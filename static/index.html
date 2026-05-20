@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tacx Flux Climber</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <h1>Tacx Flux Climber</h1>
+          <p>Puertos reales, entrenamiento local.</p>
+        </div>
+        <nav>
+          <button data-view="routes" class="active">Rutas</button>
+          <button data-view="import">Crear Ruta</button>
+          <button data-view="activities">Actividades</button>
+          <button data-view="settings">Ajustes</button>
+        </nav>
+      </aside>
+      <main id="app" class="content"></main>
+    </div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
