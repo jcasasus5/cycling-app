@@ -1,5 +1,7 @@
 const app = document.querySelector("#app");
-const navButtons = document.querySelectorAll("nav button");
+const navButtons = document.querySelectorAll("[data-view]");
+const MESSAGE_DURATION_MS = 4600;
+let messageTimer = null;
 
 const state = {
   view: "routes",
@@ -62,7 +64,7 @@ function setView(view) {
   }
   if (view !== "training" && previousView === "training") state.resumeActivity = null;
   state.view = view;
-  state.message = "";
+  clearMessage();
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   render();
 }
@@ -73,37 +75,83 @@ function render() {
     state.training = null;
   }
 
-  const message = state.message ? `<div class="notice">${escapeHtml(state.message)}</div>` : "";
-  if (state.view === "routes") app.innerHTML = message + renderRoutes();
-  if (state.view === "import") app.innerHTML = message + renderImport();
-  if (state.view === "route-detail") app.innerHTML = message + renderRouteDetail();
-  if (state.view === "training") app.innerHTML = message + renderTraining();
-  if (state.view === "activities") app.innerHTML = message + renderActivities();
-  if (state.view === "settings") app.innerHTML = message + renderSettings();
+  if (state.view === "routes") app.innerHTML = renderRoutes();
+  if (state.view === "import") app.innerHTML = renderImport();
+  if (state.view === "route-detail") app.innerHTML = renderRouteDetail();
+  if (state.view === "training") app.innerHTML = renderTraining();
+  if (state.view === "activities") app.innerHTML = renderActivities();
+  if (state.view === "settings") app.innerHTML = renderSettings();
 
   if (state.routeModalOpen && state.selectedRoute) app.insertAdjacentHTML("beforeend", renderRouteModal());
   if (state.activityModalOpen && state.selectedActivity) app.insertAdjacentHTML("beforeend", renderActivityModal());
   if (state.busyText) app.insertAdjacentHTML("beforeend", renderBusyOverlay());
+  if (state.message) app.insertAdjacentHTML("beforeend", renderToast());
 
   bindEvents();
   drawCharts();
 }
 
+function showMessage(message) {
+  state.message = message;
+  if (messageTimer) clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => {
+    state.message = "";
+    messageTimer = null;
+    render();
+  }, MESSAGE_DURATION_MS);
+}
+
+function clearMessage() {
+  state.message = "";
+  if (messageTimer) clearTimeout(messageTimer);
+  messageTimer = null;
+}
+
+function renderToast() {
+  return `
+    <div class="toast" role="status" aria-live="polite">
+      <span>${escapeHtml(state.message)}</span>
+      <div class="toast-progress" style="--toast-duration: ${MESSAGE_DURATION_MS}ms"></div>
+    </div>
+  `;
+}
+
 function renderRoutes() {
+  const totalKm = state.routes.reduce((sum, route) => sum + route.distance_km, 0);
+  const totalElevation = state.routes.reduce((sum, route) => sum + route.elevation_gain_m, 0);
+  const maxGrade = state.routes.reduce((max, route) => Math.max(max, route.max_grade_percent), 0);
   const cards = state.routes.map((route) => `
-    <article class="card" data-open-route="${route.id}">
-      <h3>${escapeHtml(route.name)}</h3>
-      <p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+ · ${route.avg_grade_percent.toFixed(1)}% media · ${route.max_grade_percent.toFixed(1)}% máx.</p>
+    <article class="card route-card" data-open-route="${route.id}" role="button" tabindex="0">
+      <div class="card-top">
+        <div>
+          <span class="eyebrow">Ruta</span>
+          <h3>${escapeHtml(route.name)}</h3>
+          <p>${new Date(route.created_at).toLocaleDateString("es-ES")}</p>
+        </div>
+        <span class="route-ribbon">${route.max_grade_percent.toFixed(1)}% max</span>
+      </div>
+      <div class="route-stats">
+        ${statPill("Distancia", `${route.distance_km.toFixed(2)} km`)}
+        ${statPill("Desnivel", `${Math.round(route.elevation_gain_m)} m+`)}
+        ${statPill("Media", `${route.avg_grade_percent.toFixed(1)}%`)}
+        ${statPill("Final", `${Math.round(route.end_altitude_m)} m`)}
+      </div>
     </article>
   `).join("");
   return `
     <section>
       <header class="page-header">
-        <div><h2>Biblioteca de rutas</h2><p>${state.routes.length} rutas guardadas</p></div>
-        <button data-view-action="import">Crear Ruta</button>
+        <div><span class="eyebrow">Biblioteca</span><h2>Rutas</h2><p>${state.routes.length} rutas guardadas</p></div>
+        <button class="primary" data-view-action="import">Crear ruta</button>
       </header>
+      <div class="dashboard-strip">
+        ${metric("Rutas", state.routes.length)}
+        ${metric("Kilometros", `${totalKm.toFixed(1)} km`)}
+        ${metric("Desnivel", `${Math.round(totalElevation)} m+`)}
+        ${metric("Mayor pendiente", `${maxGrade.toFixed(1)}%`)}
+      </div>
       <div class="grid-list">${cards}</div>
-      ${state.routes.length ? "" : `<div class="empty-state">Crea una ruta manualmente o analiza una imagen con OpenAI.</div>`}
+      ${state.routes.length ? "" : `<div class="empty-state"><strong>No hay rutas guardadas</strong><button class="primary" data-view-action="import">Crear ruta</button></div>`}
     </section>
   `;
 }
@@ -112,15 +160,23 @@ function renderImport() {
   return `
     <section>
       <header class="page-header">
-        <div><h2>Crear Ruta</h2><p>Sube una imagen con OpenAI o introduce los datos manualmente.</p></div>
-        <div class="actions">
-          <label><input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" /></label>
-          <button data-action="analyze-image" ${state.busyText ? "disabled" : ""}>Analizar imagen</button>
-          <button class="primary" data-action="save-draft" ${state.busyText ? "disabled" : ""}>Guardar ruta</button>
-        </div>
+        <div><span class="eyebrow">Editor</span><h2>Crear ruta</h2><p>${state.draft.name ? escapeHtml(state.draft.name) : "Nueva ruta"}</p></div>
       </header>
+      <div class="upload-panel">
+        <label class="dropzone" data-dropzone for="image-file">
+          <input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" />
+          <span class="upload-icon">+</span>
+          <strong data-upload-name>Arrastra una imagen aquí</strong>
+          <span>o haz click para seleccionar un perfil de altimetría</span>
+          <small>PNG, JPG o WebP</small>
+        </label>
+        <button data-action="analyze-image" ${state.busyText ? "disabled" : ""}>Analizar imagen</button>
+      </div>
       ${renderRouteForm(state.draft)}
-      <canvas class="chart" data-chart="draft"></canvas>
+      <div class="chart-shell"><canvas class="chart" data-chart="draft"></canvas></div>
+      <div class="bottom-actions">
+        <button class="primary large-action" data-action="save-draft" ${state.busyText ? "disabled" : ""}>Guardar ruta</button>
+      </div>
     </section>
   `;
 }
@@ -132,6 +188,7 @@ function renderRouteModal() {
       <section class="modal" role="dialog" aria-modal="true" aria-label="Detalle de ruta" data-modal-panel>
         <header class="page-header">
           <div>
+            <span class="eyebrow">Detalle de ruta</span>
             <h2>${escapeHtml(route.name)}</h2>
             <p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+ · ${route.avg_grade_percent.toFixed(1)}% media · ${route.max_grade_percent.toFixed(1)}% máx.</p>
           </div>
@@ -144,7 +201,7 @@ function renderRouteModal() {
           </div>
         </header>
         ${renderRouteForm(state.draft)}
-        <canvas class="chart" data-chart="selected"></canvas>
+        <div class="chart-shell"><canvas class="chart" data-chart="selected"></canvas></div>
       </section>
     </div>
   `;
@@ -168,7 +225,7 @@ function renderRouteDetail() {
   return `
     <section>
       <header class="page-header">
-        <div><h2>${escapeHtml(route.name)}</h2><p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+</p></div>
+        <div><span class="eyebrow">Detalle de ruta</span><h2>${escapeHtml(route.name)}</h2><p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+</p></div>
         <div class="actions">
           <button data-action="duplicate-route">Duplicar</button>
           <button data-action="delete-route">Eliminar</button>
@@ -177,7 +234,7 @@ function renderRouteDetail() {
         </div>
       </header>
       ${renderRouteForm(routeToDraft(route))}
-      <canvas class="chart" data-chart="selected"></canvas>
+      <div class="chart-shell"><canvas class="chart" data-chart="selected"></canvas></div>
     </section>
   `;
 }
@@ -192,32 +249,45 @@ function renderTraining() {
   const trainerGrade = applyTrainerGradeLimit(realGrade);
   const altitude = interpolateAltitude(segment, t.km, route.start_altitude_m);
   const paused = t.speed <= 0.2;
+  const progress = route.distance_km > 0 ? Math.min(100, (t.km / route.distance_km) * 100) : 0;
   return `
     <section>
       <header class="page-header">
-        <div><h2>${escapeHtml(route.name)}</h2><p>${t.activityId ? "Continuando actividad parcial" : paused ? "Pausada" : t.running ? "En marcha" : "Preparada"} · pendiente real ${realGrade.toFixed(1)}% · rodillo ${trainerGrade.toFixed(1)}%</p></div>
+        <div><span class="eyebrow">Entrenamiento</span><h2>${escapeHtml(route.name)}</h2><p>${t.activityId ? "Continuando actividad parcial" : paused ? "Pausada" : t.running ? "En marcha" : "Preparada"} · real ${realGrade.toFixed(1)}% · rodillo ${trainerGrade.toFixed(1)}%</p></div>
         <div class="actions">
           <button data-action="toggle-training">${t.running ? "Pausar manual" : "Iniciar"}</button>
           <button data-action="save-partial">Guardar parcial</button>
           <button class="primary" data-action="save-completed">Terminar</button>
         </div>
       </header>
-      <canvas class="chart" data-chart="training"></canvas>
-      <div class="metrics">
-        ${metric("Kilómetro", `${t.km.toFixed(2)} / ${route.distance_km.toFixed(2)}`)}
-        ${metric("Tiempo activo", formatSeconds(t.activeSeconds))}
-        ${metric("Tiempo total", formatSeconds(t.elapsed))}
-        ${metric("Velocidad", `${t.speed.toFixed(1)} km/h`)}
-        ${metric("Cadencia", `${paused ? 0 : Math.max(50, Math.round(92 - Math.max(0, trainerGrade) * 2))} rpm`)}
-        ${metric("Potencia", `${paused ? 0 : Math.round(150 + Math.max(0, trainerGrade) * 18 + t.speed * 2)} W`)}
-        ${metric("Altitud virtual", `${Math.round(altitude)} m`)}
-        ${metric("Desnivel", `${Math.max(0, Math.round(altitude - route.start_altitude_m))} m`)}
-      </div>
-      <div class="panel">
-        <label>Velocidad simulada
-          <input type="range" min="0" max="45" value="${t.speed}" data-action="speed" />
-          <span>${t.speed.toFixed(1)} km/h</span>
-        </label>
+      <div class="training-layout">
+        <div class="training-main">
+          <div class="training-status">
+            <div class="progress-header"><span>${t.km.toFixed(2)} / ${route.distance_km.toFixed(2)} km</span><strong>${progress.toFixed(0)}%</strong></div>
+            <div class="progress-track"><div class="progress-fill" style="--progress: ${progress}%"></div></div>
+          </div>
+          <div class="chart-shell"><canvas class="chart" data-chart="training"></canvas></div>
+          <div class="metrics">
+            ${metric("Tiempo activo", formatSeconds(t.activeSeconds))}
+            ${metric("Tiempo total", formatSeconds(t.elapsed))}
+            ${metric("Altitud virtual", `${Math.round(altitude)} m`)}
+            ${metric("Desnivel", `${Math.max(0, Math.round(altitude - route.start_altitude_m))} m`)}
+          </div>
+        </div>
+        <aside class="training-side">
+          <div class="panel range-control">
+            <label>Velocidad simulada
+              <input type="range" min="0" max="45" value="${t.speed}" data-action="speed" />
+              <span class="range-value">${t.speed.toFixed(1)} km/h</span>
+            </label>
+          </div>
+          <div class="metrics">
+            ${metric("Velocidad", `${t.speed.toFixed(1)} km/h`)}
+            ${metric("Cadencia", `${paused ? 0 : Math.max(50, Math.round(92 - Math.max(0, trainerGrade) * 2))} rpm`)}
+            ${metric("Potencia", `${paused ? 0 : Math.round(150 + Math.max(0, trainerGrade) * 18 + t.speed * 2)} W`)}
+            ${metric("Pendiente", `${trainerGrade.toFixed(1)}%`)}
+          </div>
+        </aside>
       </div>
     </section>
   `;
@@ -225,15 +295,28 @@ function renderTraining() {
 
 function renderActivities() {
   const cards = state.activities.map((activity) => `
-    <article class="card activity-card" data-open-activity="${activity.id}">
-      <h3>${escapeHtml(activity.route_name)}</h3>
-      <p>${new Date(activity.started_at).toLocaleDateString("es-ES")} · ${activity.distance_km.toFixed(2)} km · ${formatSeconds(activity.active_seconds)} · ${activity.avg_power_w} W media · ${activity.status === "completed" ? "Completada" : "Parcial"}</p>
+    <article class="card activity-card" data-open-activity="${activity.id}" role="button" tabindex="0">
+      <div class="card-top">
+        <div>
+          <span class="eyebrow">${new Date(activity.started_at).toLocaleDateString("es-ES")}</span>
+          <h3>${escapeHtml(activity.route_name)}</h3>
+          <p>${formatSeconds(activity.active_seconds)} activo · ${formatSeconds(activity.total_seconds)} total</p>
+        </div>
+        <span class="status-chip ${activity.status === "partial" ? "partial" : ""}">${activity.status === "completed" ? "Completada" : "Parcial"}</span>
+      </div>
+      <div class="activity-stats">
+        ${statPill("Distancia", `${activity.distance_km.toFixed(2)} km`)}
+        ${statPill("Potencia", `${activity.avg_power_w} W`)}
+        ${statPill("Cadencia", `${activity.avg_cadence_rpm} rpm`)}
+        ${statPill("Velocidad", `${activity.avg_speed_kph.toFixed(1)} km/h`)}
+      </div>
     </article>
   `).join("");
   return `
     <section>
-      <header class="page-header"><div><h2>Actividades realizadas</h2><p>${state.activities.length} entrenamientos guardados</p></div></header>
+      <header class="page-header"><div><span class="eyebrow">Historial</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados</p></div></header>
       <div class="grid-list">${cards}</div>
+      ${state.activities.length ? "" : `<div class="empty-state"><strong>No hay actividades guardadas</strong><button class="primary" data-view-action="routes">Ver rutas</button></div>`}
     </section>
   `;
 }
@@ -245,14 +328,14 @@ function renderActivityModal() {
     <div class="modal-backdrop" data-action="close-activity-modal">
       <section class="modal" role="dialog" aria-modal="true" aria-label="Detalle de actividad" data-modal-panel>
       <header class="page-header">
-        <div><h2>${escapeHtml(activity.route_name)}</h2><p>${activity.status === "completed" ? "Completada" : "Parcial"} · ${activity.distance_km.toFixed(2)} km · ${formatSeconds(activity.active_seconds)}</p></div>
+        <div><span class="eyebrow">Detalle de actividad</span><h2>${escapeHtml(activity.route_name)}</h2><p>${activity.status === "completed" ? "Completada" : "Parcial"} · ${activity.distance_km.toFixed(2)} km · ${formatSeconds(activity.active_seconds)}</p></div>
         <div class="actions">
           ${activity.status === "partial" ? `<button class="primary" data-action="resume-activity">Continuar</button>` : ""}
           <button class="danger" data-action="delete-current-activity">Eliminar</button>
           <button data-action="close-activity-modal">Cerrar</button>
         </div>
       </header>
-      <canvas class="chart" data-chart="activity"></canvas>
+      <div class="chart-shell"><canvas class="chart" data-chart="activity"></canvas></div>
       <div class="metrics">
         ${metric("Potencia media", `${activity.avg_power_w} W`)}
         ${metric("Potencia máxima", `${activity.max_power_w} W`)}
@@ -271,10 +354,10 @@ function renderSettings() {
   return `
     <section>
       <header class="page-header">
-        <div><h2>Ajustes</h2><p>Configuración local de OpenAI y simulación.</p></div>
+        <div><span class="eyebrow">Preferencias</span><h2>Ajustes</h2><p>OpenAI y simulación</p></div>
         <button class="primary" data-action="save-settings">Guardar ajustes</button>
       </header>
-      <div class="panel form-grid">
+      <div class="panel form-grid settings-panel">
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="${escapeAttr(s.openai_api_key)}" /></label>
         <label>Pendiente máxima rodillo<input type="number" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /></label>
         <label>Peso ciclista<input type="number" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /></label>
@@ -299,9 +382,11 @@ function renderRouteForm(draft) {
     </div>
   `).join("");
   return `
-    <div class="panel" id="route-form">
+    <div class="panel route-editor" id="route-form">
       <div class="form-grid">
         <label class="wide">Nombre<input name="name" value="${escapeAttr(draft.name)}" /></label>
+      </div>
+      <div class="summary-grid">
         ${readonlyNumber("Distancia total", `${calculated.distance_km.toFixed(2)} km`)}
         ${readonlyNumber("Desnivel positivo", `${Math.round(calculated.elevation_gain_m)} m`)}
         ${readonlyNumber("Altitud inicial", `${Math.round(calculated.start_altitude_m)} m`)}
@@ -309,9 +394,14 @@ function renderRouteForm(draft) {
         ${readonlyNumber("Pendiente media", `${calculated.avg_grade_percent.toFixed(1)}%`)}
         ${readonlyNumber("Pendiente máxima", `${calculated.max_grade_percent.toFixed(1)}%`)}
       </div>
-      <h3>Segmentos</h3>
+      <div class="segments-header">
+        <div>
+          <h3>Segmentos</h3>
+          <p>${draft.segments.length} tramos</p>
+        </div>
+        <button data-action="add-segment" type="button">Añadir segmento</button>
+      </div>
       <div class="segments-table">${rows}</div>
-      <button data-action="add-segment">Añadir segmento</button>
     </div>
   `;
 }
@@ -325,11 +415,21 @@ function bindEvents() {
     state.routeModalOpen = true;
     render();
   }));
+  document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    el.click();
+  }));
   document.querySelectorAll("[data-open-activity]").forEach((el) => el.addEventListener("click", async () => {
     state.selectedActivity = await api(`/api/activities/${el.dataset.openActivity}`);
     state.selectedRoute = await api(`/api/routes/${state.selectedActivity.activity.route_id}`);
     state.activityModalOpen = true;
     render();
+  }));
+  document.querySelectorAll("[data-open-activity]").forEach((el) => el.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    el.click();
   }));
   document.querySelectorAll("#route-form input").forEach((input) => input.addEventListener("input", syncDraftFromForm));
   document.querySelectorAll("[data-delete-segment]").forEach((el) => el.addEventListener("click", () => {
@@ -350,6 +450,7 @@ function bindEvents() {
   });
   document.querySelector("[data-action='save-draft']")?.addEventListener("click", saveDraft);
   document.querySelector("[data-action='analyze-image']")?.addEventListener("click", analyzeImage);
+  bindDropzone();
   document.querySelector("[data-action='update-route']")?.addEventListener("click", updateRoute);
   document.querySelector("[data-action='duplicate-route']")?.addEventListener("click", duplicateRoute);
   document.querySelector("[data-action='delete-route']")?.addEventListener("click", deleteRoute);
@@ -384,6 +485,42 @@ function bindEvents() {
   document.querySelector("[data-action='save-settings']")?.addEventListener("click", saveSettings);
 }
 
+function bindDropzone() {
+  const dropzone = document.querySelector("[data-dropzone]");
+  const fileInput = document.querySelector("#image-file");
+  const fileName = document.querySelector("[data-upload-name]");
+  if (!dropzone || !fileInput || !fileName) return;
+
+  const updateFileName = () => {
+    const file = fileInput.files?.[0];
+    fileName.textContent = file ? file.name : "Arrastra una imagen aquí";
+    dropzone.classList.toggle("has-file", Boolean(file));
+  };
+
+  fileInput.addEventListener("change", updateFileName);
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragging");
+    });
+  });
+
+  ["dragleave", "dragend"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, () => {
+      dropzone.classList.remove("dragging");
+    });
+  });
+
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragging");
+    if (!event.dataTransfer?.files?.length) return;
+    fileInput.files = event.dataTransfer.files;
+    updateFileName();
+  });
+}
+
 function syncDraftFromForm() {
   const form = document.querySelector("#route-form");
   if (!form) return;
@@ -413,7 +550,7 @@ function currentDraft() {
 function deleteSegment(index) {
   const draft = currentDraft();
   if (draft.segments.length <= 1) {
-    state.message = "La ruta necesita al menos un segmento.";
+    showMessage("La ruta necesita al menos un segmento.");
     render();
     return;
   }
@@ -473,13 +610,13 @@ function updateCalculatedFields(draft) {
 function validateRouteDraft(draft) {
   applyRouteCalculations(draft);
   if (!draft.name.trim()) {
-    state.message = "Pon un nombre a la ruta antes de guardar.";
+    showMessage("Pon un nombre a la ruta antes de guardar.");
     render();
     return false;
   }
   const invalidSegment = draft.segments.find((segment) => segment.end_km <= segment.start_km);
   if (invalidSegment || draft.distance_km <= 0) {
-    state.message = "Cada segmento debe tener un km final mayor que el km inicial.";
+    showMessage("Cada segmento debe tener un km final mayor que el km inicial.");
     render();
     return false;
   }
@@ -539,7 +676,7 @@ async function deleteActivity(activityId) {
 async function analyzeImage() {
   const file = document.querySelector("#image-file")?.files?.[0];
   if (!file) {
-    state.message = "Selecciona primero una imagen.";
+    showMessage("Selecciona primero una imagen.");
     render();
     return;
   }
@@ -550,9 +687,9 @@ async function analyzeImage() {
   try {
     const result = await api("/api/import/image", { method: "POST", body: formData });
     state.draft = result.draft;
-    state.message = "Imagen analizada. Revisa los datos antes de guardar.";
+    showMessage("Imagen analizada. Revisa los datos antes de guardar.");
   } catch (error) {
-    state.message = error.message;
+    showMessage(error.message);
   } finally {
     state.busyText = "";
   }
@@ -665,13 +802,13 @@ async function saveActivity(status) {
   } catch (error) {
     state.savingActivity = false;
     state.busyText = "";
-    state.message = error.message;
+    showMessage(error.message);
     render();
   }
 }
 
 async function saveSettings() {
-  const root = document.querySelector(".panel");
+  const root = document.querySelector(".settings-panel");
   state.settings = {
     openai_api_key: root.querySelector("[name='openai_api_key']").value,
     max_trainer_grade_percent: Number(root.querySelector("[name='max_trainer_grade_percent']").value),
@@ -681,7 +818,7 @@ async function saveSettings() {
     bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
   };
   state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(state.settings) });
-  state.message = "Ajustes guardados.";
+  showMessage("Ajustes guardados.");
   render();
 }
 
@@ -726,7 +863,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
   const x = (km) => padding.left + (km / maxKm) * (width - padding.left - padding.right);
   const y = (alt) => height - padding.bottom - ((alt - minAlt) / altitudeSpan) * (height - padding.top - padding.bottom);
 
-  ctx.strokeStyle = "#d9e2e1";
+  ctx.strokeStyle = "#e2e7ea";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 5; i++) {
     const gy = padding.top + i * ((height - padding.top - padding.bottom) / 5);
@@ -735,7 +872,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     ctx.moveTo(padding.left, gy);
     ctx.lineTo(width - padding.right, gy);
     ctx.stroke();
-    ctx.fillStyle = "#60726c";
+    ctx.fillStyle = "#687178";
     ctx.font = "11px sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -747,9 +884,9 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     ctx.beginPath();
     ctx.moveTo(gx, padding.top);
     ctx.lineTo(gx, height - padding.bottom);
-    ctx.strokeStyle = "#edf2f1";
+    ctx.strokeStyle = "#eef2f3";
     ctx.stroke();
-    ctx.fillStyle = "#60726c";
+    ctx.fillStyle = "#687178";
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
@@ -766,7 +903,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
   ctx.lineTo(x(maxKm), height - padding.bottom);
   ctx.lineTo(x(0), height - padding.bottom);
   ctx.closePath();
-  ctx.fillStyle = "rgba(47, 133, 90, 0.16)";
+  ctx.fillStyle = "rgba(15, 118, 110, 0.13)";
   ctx.fill();
 
   ctx.beginPath();
@@ -776,7 +913,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     if (index === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   });
-  ctx.strokeStyle = "#1f6f4a";
+  ctx.strokeStyle = "#0f766e";
   ctx.lineWidth = 3;
   ctx.stroke();
 
@@ -786,7 +923,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     const endX = x(segment.end_km);
     const labelX = startX + (endX - startX) / 2;
     const grade = Number(segment.grade_percent ?? calculateSegmentGrade(segment));
-    ctx.fillStyle = grade >= 8 ? "#8a1f1f" : grade >= 5 ? "#9a4d0f" : "#146c5f";
+    ctx.fillStyle = grade >= 8 ? "#b42318" : grade >= 5 ? "#c56b17" : "#0f766e";
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -794,15 +931,15 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     ctx.beginPath();
     ctx.moveTo(startX, padding.top - 8);
     ctx.lineTo(endX, padding.top - 8);
-    ctx.strokeStyle = "rgba(20, 108, 95, 0.28)";
+    ctx.strokeStyle = "rgba(15, 118, 110, 0.28)";
     ctx.lineWidth = 2;
     ctx.stroke();
   });
 
   if (completedKm !== null) drawMarker(ctx, x(completedKm), padding.top, height - padding.bottom, "#0f766e");
-  if (currentKm !== null) drawMarker(ctx, x(currentKm), padding.top, height - padding.bottom, "#c2410c");
+  if (currentKm !== null) drawMarker(ctx, x(currentKm), padding.top, height - padding.bottom, "#ef8a23");
 
-  ctx.fillStyle = "#60726c";
+  ctx.fillStyle = "#687178";
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -898,8 +1035,12 @@ function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
+function statPill(label, value) {
+  return `<div class="stat-pill"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
 function numberInput(label, name, value) {
-  return `<label>${label}<input type="number" step="0.1" name="${name}" value="${value}" /></label>`;
+  return `<label>${label}<input type="number" step="0.1" inputmode="decimal" name="${name}" value="${value}" /></label>`;
 }
 
 function readonlyNumber(label, value) {
