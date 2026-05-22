@@ -635,14 +635,100 @@ input[type="range"] {
   background: linear-gradient(90deg, var(--brand), var(--accent));
 }
 
-.range-control {
+.range-control,
+.trainer-panel,
+.trainer-settings-panel {
   display: grid;
   gap: 10px;
+}
+
+.trainer-settings-panel {
+  gap: 16px;
+}
+
+.trainer-settings-panel h3 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.trainer-settings-panel p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.trainer-settings-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .range-control label {
   display: grid;
   gap: 12px;
+}
+
+.trainer-panel strong {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.trainer-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.calibration-modal {
+  width: min(900px, 96vw);
+}
+
+.calibration-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.calibration-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.calibration-step > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.calibration-step.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.calibration-step.active > span {
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.calibration-step strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.calibration-step p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .range-value {
@@ -835,7 +921,8 @@ input[type="range"] {
   }
 
   .actions button,
-  .actions label {
+  .actions label,
+  .trainer-settings-actions button {
     width: 100%;
   }
 

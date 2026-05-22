@@ -1,7 +1,11 @@
+import { FtmsTrainer } from "./ftms-trainer.js";
+
 const app = document.querySelector("#app");
 const navButtons = document.querySelectorAll("[data-view]");
 const MESSAGE_DURATION_MS = 4600;
 let messageTimer = null;
+let trainerClient = null;
+let gradeCommandPending = false;
 
 const state = {
   view: "routes",
@@ -13,6 +17,15 @@ const state = {
   draft: emptyDraft(),
   message: "",
   training: null,
+  trainer: {
+    connected: false,
+    connecting: false,
+    status: "Rodillo no conectado",
+    metrics: emptyTrainerMetrics(),
+    lastDataAt: null,
+    features: null
+  },
+  calibration: emptyCalibrationState(),
   resumeActivity: null,
   routeModalOpen: false,
   activityModalOpen: false,
@@ -84,6 +97,7 @@ function render() {
 
   if (state.routeModalOpen && state.selectedRoute) app.insertAdjacentHTML("beforeend", renderRouteModal());
   if (state.activityModalOpen && state.selectedActivity) app.insertAdjacentHTML("beforeend", renderActivityModal());
+  if (state.calibration.open) app.insertAdjacentHTML("beforeend", renderCalibrationModal());
   if (state.busyText) app.insertAdjacentHTML("beforeend", renderBusyOverlay());
   if (state.message) app.insertAdjacentHTML("beforeend", renderToast());
 
@@ -117,9 +131,6 @@ function renderToast() {
 }
 
 function renderRoutes() {
-  const totalKm = state.routes.reduce((sum, route) => sum + route.distance_km, 0);
-  const totalElevation = state.routes.reduce((sum, route) => sum + route.elevation_gain_m, 0);
-  const maxGrade = state.routes.reduce((max, route) => Math.max(max, route.max_grade_percent), 0);
   const cards = state.routes.map((route) => `
     <article class="card route-card" data-open-route="${route.id}" role="button" tabindex="0">
       <div class="card-top">
@@ -144,12 +155,6 @@ function renderRoutes() {
         <div><span class="eyebrow">Biblioteca</span><h2>Rutas</h2><p>${state.routes.length} rutas guardadas</p></div>
         <button class="primary" data-view-action="import">Crear ruta</button>
       </header>
-      <div class="dashboard-strip">
-        ${metric("Rutas", state.routes.length)}
-        ${metric("Kilometros", `${totalKm.toFixed(1)} km`)}
-        ${metric("Desnivel", `${Math.round(totalElevation)} m+`)}
-        ${metric("Mayor pendiente", `${maxGrade.toFixed(1)}%`)}
-      </div>
       <div class="grid-list">${cards}</div>
       ${state.routes.length ? "" : `<div class="empty-state"><strong>No hay rutas guardadas</strong><button class="primary" data-view-action="import">Crear ruta</button></div>`}
     </section>
@@ -244,18 +249,24 @@ function renderTraining() {
   if (!route) return `<div class="empty-state">Selecciona una ruta.</div>`;
   if (!state.training) resetTraining();
   const t = state.training;
+  syncTrainingFromTrainer();
   const segment = getSegmentAtKm(route.segments, t.km);
   const realGrade = segment?.grade_percent ?? 0;
   const trainerGrade = applyTrainerGradeLimit(realGrade);
   const altitude = interpolateAltitude(segment, t.km, route.start_altitude_m);
-  const paused = t.speed <= 0.2;
+  const paused = !hasLiveTrainerData() || t.speed <= 0.2;
   const progress = route.distance_km > 0 ? Math.min(100, (t.km / route.distance_km) * 100) : 0;
+  const cadence = paused ? 0 : Math.round(state.trainer.metrics.cadence_rpm);
+  const power = paused ? 0 : Math.round(state.trainer.metrics.power_w);
+  const connectDisabled = state.trainer.connecting || state.trainer.connected;
+  const rideStatus = t.activityId ? "Continuando actividad parcial" : t.running ? (paused ? "Pausada" : "En marcha") : "Preparada";
   return `
     <section>
       <header class="page-header">
-        <div><span class="eyebrow">Entrenamiento</span><h2>${escapeHtml(route.name)}</h2><p>${t.activityId ? "Continuando actividad parcial" : paused ? "Pausada" : t.running ? "En marcha" : "Preparada"} · real ${realGrade.toFixed(1)}% · rodillo ${trainerGrade.toFixed(1)}%</p></div>
+        <div><span class="eyebrow">Entrenamiento</span><h2>${escapeHtml(route.name)}</h2><p>${rideStatus} · real ${realGrade.toFixed(1)}% · rodillo ${trainerGrade.toFixed(1)}%</p></div>
         <div class="actions">
-          <button data-action="toggle-training">${t.running ? "Pausar manual" : "Iniciar"}</button>
+          <button data-action="connect-trainer" ${connectDisabled ? "disabled" : ""}>${state.trainer.connecting ? "Conectando..." : state.trainer.connected ? "Tacx conectado" : "Conectar Tacx"}</button>
+          <button data-action="toggle-training" ${state.trainer.connected ? "" : "disabled"}>${t.running ? "Pausar manual" : "Iniciar"}</button>
           <button data-action="save-partial">Guardar parcial</button>
           <button class="primary" data-action="save-completed">Terminar</button>
         </div>
@@ -275,16 +286,16 @@ function renderTraining() {
           </div>
         </div>
         <aside class="training-side">
-          <div class="panel range-control">
-            <label>Velocidad simulada
-              <input type="range" min="0" max="45" value="${t.speed}" data-action="speed" />
-              <span class="range-value">${t.speed.toFixed(1)} km/h</span>
-            </label>
+          <div class="panel trainer-panel">
+            <span class="eyebrow">Conexion FTMS</span>
+            <strong>${escapeHtml(state.trainer.status)}</strong>
+            <p>${state.trainer.connected ? "Leyendo datos reales del Tacx y enviando la pendiente de la ruta." : "Usa Chrome o Edge y conecta el rodillo por Bluetooth."}</p>
+            ${state.trainer.connected ? `<button data-action="disconnect-trainer">Desconectar</button>` : ""}
           </div>
           <div class="metrics">
             ${metric("Velocidad", `${t.speed.toFixed(1)} km/h`)}
-            ${metric("Cadencia", `${paused ? 0 : Math.max(50, Math.round(92 - Math.max(0, trainerGrade) * 2))} rpm`)}
-            ${metric("Potencia", `${paused ? 0 : Math.round(150 + Math.max(0, trainerGrade) * 18 + t.speed * 2)} W`)}
+            ${metric("Cadencia", `${cadence} rpm`)}
+            ${metric("Potencia", `${power} W`)}
             ${metric("Pendiente", `${trainerGrade.toFixed(1)}%`)}
           </div>
         </aside>
@@ -294,6 +305,9 @@ function renderTraining() {
 }
 
 function renderActivities() {
+  const totalKm = state.activities.reduce((sum, activity) => sum + activity.distance_km, 0);
+  const totalElevation = state.activities.reduce((sum, activity) => sum + activity.completed_elevation_m, 0);
+  const maxPower = state.activities.reduce((max, activity) => Math.max(max, activity.max_power_w), 0);
   const cards = state.activities.map((activity) => `
     <article class="card activity-card" data-open-activity="${activity.id}" role="button" tabindex="0">
       <div class="card-top">
@@ -315,6 +329,12 @@ function renderActivities() {
   return `
     <section>
       <header class="page-header"><div><span class="eyebrow">Historial</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados</p></div></header>
+      <div class="dashboard-strip">
+        ${metric("Actividades", state.activities.length)}
+        ${metric("Kilometros", `${totalKm.toFixed(1)} km`)}
+        ${metric("Desnivel", `${Math.round(totalElevation)} m+`)}
+        ${metric("Mayor potencia", `${maxPower} W`)}
+      </div>
       <div class="grid-list">${cards}</div>
       ${state.activities.length ? "" : `<div class="empty-state"><strong>No hay actividades guardadas</strong><button class="primary" data-view-action="routes">Ver rutas</button></div>`}
     </section>
@@ -354,9 +374,10 @@ function renderSettings() {
   return `
     <section>
       <header class="page-header">
-        <div><span class="eyebrow">Preferencias</span><h2>Ajustes</h2><p>OpenAI y simulación</p></div>
+        <div><span class="eyebrow">Preferencias</span><h2>Ajustes</h2><p>OpenAI, rodillo y simulación</p></div>
         <button class="primary" data-action="save-settings">Guardar ajustes</button>
       </header>
+      ${renderTrainerSettingsPanel()}
       <div class="panel form-grid settings-panel">
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="${escapeAttr(s.openai_api_key)}" /></label>
         <label>Pendiente máxima rodillo<input type="number" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /></label>
@@ -366,6 +387,73 @@ function renderSettings() {
         <label class="check"><input type="checkbox" name="smooth_grade_changes" ${s.smooth_grade_changes ? "checked" : ""} /> Suavizar cambios</label>
       </div>
     </section>
+  `;
+}
+
+function renderTrainerSettingsPanel() {
+  const metrics = state.trainer.metrics;
+  const calibrationDisabled = !state.trainer.connected || state.trainer.features?.spinDownControl === false;
+  return `
+    <div class="panel trainer-settings-panel">
+      <div>
+        <span class="eyebrow">Rodillo</span>
+        <h3>Tacx FLUX 2 Smart</h3>
+        <p>${escapeHtml(state.trainer.status)}</p>
+      </div>
+      <div class="trainer-settings-actions">
+        <button data-action="connect-trainer" ${state.trainer.connecting || state.trainer.connected ? "disabled" : ""}>${state.trainer.connecting ? "Conectando..." : state.trainer.connected ? "Conectado" : "Conectar rodillo"}</button>
+        <button data-action="disconnect-trainer" ${state.trainer.connected ? "" : "disabled"}>Desconectar</button>
+        <button class="primary" data-action="start-calibration" ${calibrationDisabled ? "disabled" : ""}>Calibrar ahora</button>
+      </div>
+      <div class="metrics">
+        ${metric("Velocidad", `${Number(metrics.speed_kph || 0).toFixed(1)} km/h`)}
+        ${metric("Cadencia", `${Math.round(metrics.cadence_rpm || 0)} rpm`)}
+        ${metric("Potencia", `${Math.round(metrics.power_w || 0)} W`)}
+      </div>
+    </div>
+  `;
+}
+
+function renderCalibrationModal() {
+  const c = state.calibration;
+  const targetSpeedLabel = formatCalibrationSpeedTarget(c);
+  const currentSpeed = Number(state.trainer.metrics.speed_kph || 0).toFixed(1);
+  return `
+    <div class="modal-backdrop" data-action="close-calibration">
+      <section class="modal calibration-modal" role="dialog" aria-modal="true" aria-label="Calibrar rodillo" data-modal-panel>
+        <header class="page-header">
+          <div>
+            <span class="eyebrow">Calibracion</span>
+            <h2>Tacx FLUX 2 Smart</h2>
+            <p>${escapeHtml(c.message)}</p>
+          </div>
+          <button data-action="close-calibration">Cerrar</button>
+        </header>
+        <div class="calibration-steps">
+          ${calibrationStep("1", "Acelera progresivamente", `Lleva la bici hasta ${targetSpeedLabel}.`, c.step === "accelerate")}
+          ${calibrationStep("2", "Deja de pedalear", "Cuando la app lo indique, deja que el rodillo se pare solo.", c.step === "coast")}
+          ${calibrationStep("3", "Espera el resultado", "No toques el freno ni vuelvas a pedalear hasta que termine.", c.step === "waiting")}
+        </div>
+        <div class="metrics">
+          ${metric("Velocidad actual", `${currentSpeed} km/h`)}
+          ${metric("Velocidad objetivo", targetSpeedLabel)}
+          ${metric("Estado", escapeHtml(c.status))}
+          ${metric("Resultado", escapeHtml(c.result || "Pendiente"))}
+        </div>
+        <div class="bottom-actions">
+          <button class="primary" data-action="start-calibration-command" ${c.running ? "disabled" : ""}>${c.running ? "Calibrando..." : "Iniciar secuencia"}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function calibrationStep(number, title, description, active) {
+  return `
+    <div class="calibration-step ${active ? "active" : ""}">
+      <span>${number}</span>
+      <div><strong>${title}</strong><p>${description}</p></div>
+    </div>
   `;
 }
 
@@ -472,15 +560,20 @@ function bindEvents() {
     render();
   }));
   document.querySelector("[data-action='toggle-training']")?.addEventListener("click", toggleTraining);
+  document.querySelector("[data-action='connect-trainer']")?.addEventListener("click", connectTrainer);
+  document.querySelector("[data-action='disconnect-trainer']")?.addEventListener("click", disconnectTrainer);
+  document.querySelector("[data-action='start-calibration']")?.addEventListener("click", openCalibrationModal);
+  document.querySelector("[data-action='start-calibration-command']")?.addEventListener("click", startCalibrationCommand);
+  document.querySelectorAll("[data-action='close-calibration']").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.currentTarget.classList.contains("modal-backdrop") && event.target.closest("[data-modal-panel]")) return;
+    state.calibration.open = false;
+    render();
+  }));
   document.querySelector("[data-action='save-partial']")?.addEventListener("click", () => saveActivity("partial"));
   document.querySelector("[data-action='save-completed']")?.addEventListener("click", () => saveActivity("completed"));
   document.querySelector("[data-action='resume-activity']")?.addEventListener("click", resumeActivity);
   document.querySelector("[data-action='delete-current-activity']")?.addEventListener("click", async () => {
     if (state.selectedActivity) await deleteActivity(state.selectedActivity.activity.id);
-  });
-  document.querySelector("[data-action='speed']")?.addEventListener("input", (event) => {
-    state.training.speed = Number(event.target.value);
-    render();
   });
   document.querySelector("[data-action='save-settings']")?.addEventListener("click", saveSettings);
 }
@@ -705,14 +798,14 @@ function resetTraining() {
       elapsed: activity.total_seconds,
       activeSeconds: activity.active_seconds,
       km: activity.distance_km,
-      speed: 18,
+      speed: currentTrainerSpeed(),
       samples: state.resumeActivity.samples.map(({ id, activity_id, ...sample }) => sample),
       activityId: activity.id,
       startedAt: activity.started_at
     };
     return;
   }
-  state.training = { running: false, timer: null, elapsed: 0, activeSeconds: 0, km: 0, speed: 18, samples: [], activityId: null, startedAt: null };
+  state.training = { running: false, timer: null, elapsed: 0, activeSeconds: 0, km: 0, speed: currentTrainerSpeed(), samples: [], activityId: null, startedAt: null };
 }
 
 function resumeActivity() {
@@ -723,31 +816,202 @@ function resumeActivity() {
   setView("training");
 }
 
-function toggleTraining() {
-  if (!state.training.running) {
-    state.training.running = true;
-    state.training.timer = setInterval(tickTraining, 1000);
-  } else {
-    state.training.running = false;
-    clearInterval(state.training.timer);
+async function connectTrainer() {
+  if (state.trainer.connecting || state.trainer.connected) return;
+  state.trainer.connecting = true;
+  state.trainer.status = "Preparando Bluetooth...";
+  render();
+  try {
+    trainerClient = new FtmsTrainer({
+      onData: handleTrainerData,
+      onStatus: (status) => {
+        state.trainer.status = status;
+        render();
+      },
+      onMachineStatus: handleTrainerMachineStatus,
+      onDisconnect: () => {
+        state.trainer.connected = false;
+        state.trainer.connecting = false;
+        state.trainer.metrics = emptyTrainerMetrics();
+        state.trainer.lastDataAt = null;
+        state.trainer.features = null;
+        state.calibration = emptyCalibrationState();
+        if (state.training?.running) {
+          state.training.running = false;
+          clearInterval(state.training.timer);
+          state.training.timer = null;
+        }
+        render();
+      }
+    });
+    await trainerClient.connect();
+    state.trainer.connected = true;
+    state.trainer.connecting = false;
+    state.trainer.features = trainerClient.features;
+    await sendCurrentGradeToTrainer(true);
+    showMessage("Tacx conectado. Ya puedes iniciar el entrenamiento.");
+  } catch (error) {
+    state.trainer.connected = false;
+    state.trainer.connecting = false;
+    state.trainer.status = "Rodillo no conectado";
+    showMessage(error.message);
   }
   render();
 }
 
-function tickTraining() {
+async function disconnectTrainer() {
+  if (!trainerClient) return;
+  await trainerClient.disconnect();
+  trainerClient = null;
+  state.trainer.connected = false;
+  state.trainer.connecting = false;
+  state.trainer.status = "Rodillo no conectado";
+  state.trainer.metrics = emptyTrainerMetrics();
+  state.trainer.lastDataAt = null;
+  state.trainer.features = null;
+  state.calibration = emptyCalibrationState();
+  render();
+}
+
+function handleTrainerData(metrics) {
+  state.trainer.metrics = {
+    ...state.trainer.metrics,
+    ...metrics
+  };
+  state.trainer.lastDataAt = Date.now();
+  updateCalibrationFromSpeed();
+  if (state.training) syncTrainingFromTrainer();
+  if ((state.calibration.open || state.view === "settings") && !state.message) render();
+}
+
+function handleTrainerMachineStatus(status) {
+  if (status.type !== "spin_down") return;
+  state.calibration.status = status.label;
+  if (status.spinDownStatus === 0x02) {
+    state.calibration.step = "done";
+    state.calibration.running = false;
+    state.calibration.result = "Completada";
+    state.calibration.message = "Calibracion completada correctamente.";
+  } else if (status.spinDownStatus === 0x03) {
+    state.calibration.step = "error";
+    state.calibration.running = false;
+    state.calibration.result = "Fallida";
+    state.calibration.message = "El rodillo ha rechazado o fallado el calibrado. Prueba de nuevo con el rodillo caliente.";
+  } else if (status.spinDownStatus === 0x04) {
+    state.calibration.step = "coast";
+    state.calibration.message = "Deja de pedalear y espera a que el rodillo se detenga.";
+  }
+  if (state.calibration.open) render();
+}
+
+function openCalibrationModal() {
+  if (!state.trainer.connected) {
+    showMessage("Conecta el rodillo antes de calibrar.");
+    return;
+  }
+  if (state.trainer.features?.spinDownControl === false) {
+    showMessage("Este rodillo no anuncia calibracion por FTMS.");
+    return;
+  }
+  state.calibration = {
+    ...emptyCalibrationState(),
+    open: true,
+    status: state.trainer.features?.spinDownControl === false ? "No anunciado por FTMS" : "Listo",
+    message: "La secuencia FTMS pide acelerar hasta la velocidad objetivo y dejar de pedalear."
+  };
+  render();
+}
+
+async function startCalibrationCommand() {
+  if (!trainerClient?.connected) {
+    showMessage("Conecta el rodillo antes de calibrar.");
+    return;
+  }
+  state.calibration.running = true;
+  state.calibration.step = "accelerate";
+  state.calibration.status = "Solicitando calibracion";
+  state.calibration.message = "Acelera suavemente hasta la velocidad objetivo.";
+  state.calibration.result = "";
+  render();
+  try {
+    const result = await trainerClient.startSpinDownCalibration();
+    state.calibration.targetSpeedKph = result.targetSpeedKph || 30;
+    state.calibration.lowSpeedKph = result.lowSpeedKph;
+    state.calibration.highSpeedKph = result.highSpeedKph;
+    state.calibration.status = "Acelerando";
+    state.calibration.message = `Acelera hasta entrar en ${formatCalibrationSpeedTarget(state.calibration)} y despues deja de pedalear cuando se indique.`;
+  } catch (error) {
+    state.calibration.running = false;
+    state.calibration.step = "error";
+    state.calibration.status = "No disponible";
+    state.calibration.result = "No iniciada";
+    state.calibration.message = error.message;
+  }
+  render();
+}
+
+function updateCalibrationFromSpeed() {
+  const c = state.calibration;
+  if (!c.open || !c.running || c.step !== "accelerate") return;
+  const currentSpeed = Number(state.trainer.metrics.speed_kph || 0);
+  const minimumTargetSpeed = c.lowSpeedKph || c.targetSpeedKph;
+  if (currentSpeed >= minimumTargetSpeed) {
+    c.step = "waiting";
+    c.status = "Velocidad alcanzada";
+    c.message = "Mantente atento: el rodillo debe indicar cuando dejar de pedalear.";
+  }
+}
+
+function formatCalibrationSpeedTarget(calibration) {
+  const low = calibration.lowSpeedKph;
+  const high = calibration.highSpeedKph;
+  if (low && high && Math.abs(high - low) >= 0.1) return `${low.toFixed(1)}-${high.toFixed(1)} km/h`;
+  return `${Number(calibration.targetSpeedKph || 30).toFixed(1)} km/h`;
+}
+
+async function toggleTraining() {
+  if (!state.trainer.connected) {
+    showMessage("Conecta el Tacx FLUX 2 Smart antes de iniciar.");
+    return;
+  }
+  if (!state.training.running) {
+    try {
+      await trainerClient?.start();
+      await sendCurrentGradeToTrainer(true);
+    } catch (error) {
+      showMessage(error.message);
+      render();
+      return;
+    }
+    state.training.running = true;
+    state.training.timer = setInterval(() => {
+      tickTraining();
+    }, 1000);
+  } else {
+    state.training.running = false;
+    clearInterval(state.training.timer);
+    state.training.timer = null;
+    neutralizeTrainer().catch((error) => showMessage(error.message));
+  }
+  render();
+}
+
+async function tickTraining() {
   const route = state.selectedRoute;
   const t = state.training;
-  const paused = t.speed <= 0.2;
+  syncTrainingFromTrainer();
+  const paused = !hasLiveTrainerData() || t.speed <= 0.2;
   const segment = getSegmentAtKm(route.segments, t.km);
   const grade = applyTrainerGradeLimit(segment?.grade_percent ?? 0);
   const altitude = interpolateAltitude(segment, t.km, route.start_altitude_m);
+  await sendCurrentGradeToTrainer();
   const sample = {
     timestamp_ms: Date.now(),
     elapsed_seconds: t.elapsed + 1,
     km: t.km,
     speed_kph: paused ? 0 : t.speed,
-    cadence_rpm: paused ? 0 : Math.max(50, Math.round(92 - Math.max(0, grade) * 2)),
-    power_w: paused ? 0 : Math.round(150 + Math.max(0, grade) * 18 + t.speed * 2),
+    cadence_rpm: paused ? 0 : Math.round(state.trainer.metrics.cadence_rpm),
+    power_w: paused ? 0 : Math.round(state.trainer.metrics.power_w),
     grade_percent: grade,
     altitude_m: altitude,
     paused
@@ -765,12 +1029,41 @@ function tickTraining() {
   }
 }
 
+function syncTrainingFromTrainer() {
+  if (!state.training) return;
+  state.training.speed = currentTrainerSpeed();
+}
+
+function currentTrainerSpeed() {
+  return hasLiveTrainerData() ? Number(state.trainer.metrics.speed_kph || 0) : 0;
+}
+
+function hasLiveTrainerData() {
+  return Boolean(state.trainer.connected && state.trainer.lastDataAt && Date.now() - state.trainer.lastDataAt < 4000);
+}
+
+async function sendCurrentGradeToTrainer(force = false) {
+  if (!trainerClient?.connected || !state.selectedRoute || !state.training) return;
+  if (gradeCommandPending) return;
+  const segment = getSegmentAtKm(state.selectedRoute.segments, state.training.km);
+  const grade = applyTrainerGradeLimit(segment?.grade_percent ?? 0);
+  gradeCommandPending = true;
+  try {
+    await trainerClient.setGrade(grade, { force });
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    gradeCommandPending = false;
+  }
+}
+
 async function saveActivity(status) {
   const route = state.selectedRoute;
   const t = state.training;
   if (!t || state.savingActivity) return;
   if (t.timer) clearInterval(t.timer);
   t.running = false;
+  await neutralizeTrainer();
   const activeSamples = t.samples.filter((sample) => !sample.paused);
   const averages = calculateAverages(activeSamples);
   const lastAltitude = t.samples.at(-1)?.altitude_m ?? route.start_altitude_m;
@@ -804,6 +1097,15 @@ async function saveActivity(status) {
     state.busyText = "";
     showMessage(error.message);
     render();
+  }
+}
+
+async function neutralizeTrainer() {
+  if (!trainerClient?.connected) return;
+  try {
+    await trainerClient.neutralize();
+  } catch (error) {
+    showMessage(error.message);
   }
 }
 
@@ -1028,6 +1330,29 @@ function emptyDraft() {
     segments: [
       { start_km: 0, end_km: 0, grade_percent: 0, start_altitude_m: 0, end_altitude_m: 0 }
     ]
+  };
+}
+
+function emptyTrainerMetrics() {
+  return {
+    speed_kph: 0,
+    cadence_rpm: 0,
+    power_w: 0,
+    heart_rate_bpm: null
+  };
+}
+
+function emptyCalibrationState() {
+  return {
+    open: false,
+    running: false,
+    step: "accelerate",
+    status: "Pendiente",
+    message: "Conecta el rodillo para iniciar la calibracion.",
+    targetSpeedKph: 30,
+    lowSpeedKph: null,
+    highSpeedKph: null,
+    result: ""
   };
 }
 

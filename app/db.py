@@ -315,7 +315,7 @@ def get_settings() -> AppSettings:
             continue
         default = data[key]
         if isinstance(default, bool):
-            data[key] = row["value"] == "true"
+            data[key] = row["value"].strip().lower() in {"true", "1", "yes", "on"}
         elif isinstance(default, (int, float)):
             data[key] = float(row["value"])
         else:
@@ -328,9 +328,17 @@ def update_settings(settings: AppSettings) -> AppSettings:
         for key, value in settings.model_dump().items():
             conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, json.dumps(value) if isinstance(value, (dict, list)) else str(value)),
+                (key, serialize_setting_value(value)),
             )
     return get_settings()
+
+
+def serialize_setting_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
 
 
 def save_imported_image(path: str) -> None:
