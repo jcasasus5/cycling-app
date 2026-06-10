@@ -16,3 +16,4 @@ data/imported-images
 *.db-shm
 *.db-wal
 .DS_Store
+.vercel

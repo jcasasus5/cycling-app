@@ -31,6 +31,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0)),
     var(--bg);
@@ -104,11 +105,13 @@ button.small {
 
 .app-shell {
   min-height: 100vh;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: clamp(248px, 18vw, 300px) minmax(0, 1fr);
 }
 
 .sidebar {
+  min-width: 0;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -246,12 +249,16 @@ nav button:hover {
 }
 
 .content {
-  width: min(1440px, 100%);
-  padding: 30px;
+  min-width: 0;
+  width: min(100%, 1760px);
+  margin-inline: auto;
+  padding: clamp(24px, 2.5vw, 48px);
   overflow: auto;
 }
 
 .auth-screen .app-shell {
+  min-height: 100vh;
+  grid-template-columns: minmax(0, 1fr);
   display: grid;
   place-items: center;
 }
@@ -261,30 +268,37 @@ nav button:hover {
 }
 
 .auth-screen .content {
-  width: min(480px, 100%);
-  padding: 24px;
+  width: min(100%, 580px);
+  margin: auto;
+  padding: clamp(18px, 4vw, 40px);
+  overflow: visible;
 }
 
 .auth-card {
-  padding: 30px;
+  display: grid;
+  gap: 24px;
+  padding: clamp(24px, 5vw, 44px);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }
 
 .auth-card h2 {
   margin: 0 0 10px;
-  font-size: 34px;
+  font-size: clamp(30px, 5vw, 42px);
+  line-height: 1.05;
 }
 
 .auth-card p {
+  margin-block: 0;
   color: var(--muted);
+  line-height: 1.55;
 }
 
 .auth-card form {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .auth-card label {
@@ -310,7 +324,12 @@ nav button:hover {
 
 .auth-links {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auth-links button:only-child {
+  grid-column: 1 / -1;
 }
 
 .settings-panel small {
@@ -319,6 +338,7 @@ nav button:hover {
 }
 
 section {
+  min-width: 0;
   display: grid;
   gap: 18px;
 }
@@ -499,9 +519,14 @@ section {
 }
 
 .card-top {
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   gap: 14px;
+}
+
+.card-top > div {
+  min-width: 0;
 }
 
 .route-ribbon,
@@ -989,7 +1014,8 @@ input[type="range"] {
   }
 
   .content {
-    padding: 20px;
+    width: 100%;
+    padding: clamp(18px, 3vw, 28px);
   }
 
   .training-layout {
@@ -1005,21 +1031,56 @@ input[type="range"] {
   }
 }
 
+@media (max-width: 900px) {
+  .dashboard-strip,
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid-list {
+    grid-template-columns: repeat(auto-fit, minmax(min(270px, 100%), 1fr));
+  }
+}
+
 @media (max-width: 720px) {
+  .sidebar {
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sidebar h1 {
+    font-size: 16px;
+  }
+
   .content {
-    padding: 16px;
+    padding: 18px 14px 28px;
   }
 
   .page-header {
     display: grid;
+    gap: 16px;
+  }
+
+  .page-header h2 {
+    font-size: clamp(28px, 10vw, 38px);
   }
 
   .actions {
     justify-content: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .actions button,
-  .actions label,
   .trainer-settings-actions button {
     width: 100%;
   }
@@ -1038,20 +1099,122 @@ input[type="range"] {
   }
 
   nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  nav button {
+    min-width: 0;
+    width: auto;
+    justify-content: center;
+    gap: 6px;
+    padding-inline: 8px;
+    font-size: 13px;
+  }
+
+  .nav-icon {
+    width: 25px;
+    height: 25px;
+    flex: 0 0 auto;
   }
 
   .form-grid,
   .summary-grid,
   .metrics,
   .dashboard-strip,
-  .segment-row,
-  .route-stats,
-  .activity-stats {
+  .segment-row {
     grid-template-columns: 1fr;
   }
 
   .chart {
     height: 260px;
+  }
+
+  .panel,
+  .card {
+    padding: 16px;
+  }
+
+  .modal-backdrop,
+  .busy-overlay {
+    padding: 10px;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    padding: 16px;
+  }
+
+  .auth-screen .content {
+    padding: 16px;
+  }
+
+  .auth-card {
+    gap: 20px;
+    padding: 24px 20px;
+  }
+
+  .auth-links {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-links button:only-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand {
+    align-items: flex-start;
+  }
+
+  .brand-main {
+    gap: 9px;
+  }
+
+  .sidebar p {
+    display: none;
+  }
+
+  nav button {
+    min-height: 58px;
+    flex-direction: column;
+    line-height: 1.1;
+  }
+
+  .page-header .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .card-top,
+  .form-section-title,
+  .segments-header,
+  .progress-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .route-ribbon,
+  .status-chip {
+    white-space: normal;
+  }
+
+  .trainer-settings-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .toast {
+    top: 10px;
+    right: 10px;
+    width: calc(100vw - 20px);
+  }
+}
+
+@media (max-width: 360px) {
+  .route-stats,
+  .activity-stats {
+    grid-template-columns: 1fr;
   }
 }
