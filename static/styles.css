@@ -121,6 +121,37 @@ button.small {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.user-account {
+  margin-top: auto;
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.user-account[hidden] {
+  display: none;
+}
+
+.user-account span {
+  color: #aeb8bd;
+  font-size: 12px;
+}
+
+.user-account strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.user-account button {
+  margin-top: 4px;
+  background: transparent;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -218,6 +249,73 @@ nav button:hover {
   width: min(1440px, 100%);
   padding: 30px;
   overflow: auto;
+}
+
+.auth-screen .app-shell {
+  display: grid;
+  place-items: center;
+}
+
+.auth-screen .sidebar {
+  display: none;
+}
+
+.auth-screen .content {
+  width: min(480px, 100%);
+  padding: 24px;
+}
+
+.auth-card {
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-card h2 {
+  margin: 0 0 10px;
+  font-size: 34px;
+}
+
+.auth-card p {
+  color: var(--muted);
+}
+
+.auth-card form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-card label {
+  display: grid;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+
+.auth-message {
+  padding: 12px;
+  border-radius: 7px;
+  background: var(--brand-soft);
+  color: var(--brand-strong) !important;
+}
+
+.auth-links {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-panel small {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 section {

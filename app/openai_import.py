@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
-from pathlib import Path
 
 from fastapi import UploadFile
 from openai import OpenAI
 
-from app import db
 from app.models import ImportResult, RouteCreate
 
 
@@ -60,20 +58,12 @@ ROUTE_SCHEMA = {
 }
 
 
-async def import_route_from_image(file: UploadFile) -> ImportResult:
-    settings = db.get_settings()
-    api_key = settings.openai_api_key.strip()
+async def import_route_from_image(file: UploadFile, api_key: str) -> ImportResult:
+    api_key = api_key.strip()
     if not api_key:
         raise ValueError("Configura primero la API key de OpenAI en Ajustes.")
 
     contents = await file.read()
-    extension = Path(file.filename or "profile.png").suffix or ".png"
-    images_dir = Path("data/imported-images")
-    images_dir.mkdir(parents=True, exist_ok=True)
-    image_path = images_dir / f"profile-{db.now_iso().replace(':', '-')}{extension}"
-    image_path.write_bytes(contents)
-    db.save_imported_image(str(image_path))
-
     mime_type = file.content_type or "image/png"
     image_b64 = base64.b64encode(contents).decode("ascii")
     client = OpenAI(api_key=api_key)
@@ -114,11 +104,11 @@ async def import_route_from_image(file: UploadFile) -> ImportResult:
         raise ValueError(f"No se ha podido generar una ruta basada en la imagen porque {reason}")
     raw.pop("can_extract_route", None)
     raw.pop("failure_reason", None)
-    raw["original_image_path"] = str(image_path)
+    raw["original_image_path"] = file.filename or "profile.png"
     draft = RouteCreate(**raw)
     draft.segments.sort(key=lambda segment: segment.start_km)
     validate_extracted_route(draft)
-    return ImportResult(draft=draft, image_path=str(image_path))
+    return ImportResult(draft=draft, image_path=raw["original_image_path"])
 
 
 def validate_extracted_route(draft: RouteCreate) -> None:

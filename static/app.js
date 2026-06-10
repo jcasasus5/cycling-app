@@ -3,11 +3,17 @@ import { FtmsTrainer } from "./ftms-trainer.js";
 const app = document.querySelector("#app");
 const navButtons = document.querySelectorAll("[data-view]");
 const MESSAGE_DURATION_MS = 4600;
+const SESSION_STORAGE_KEY = "cycling-app-supabase-session";
 let messageTimer = null;
 let trainerClient = null;
 let gradeCommandPending = false;
 
 const state = {
+  config: null,
+  session: null,
+  authMode: "login",
+  authMessage: "",
+  passwordRecovery: false,
   view: "routes",
   routes: [],
   activities: [],
@@ -40,14 +46,42 @@ navButtons.forEach((button) => {
   });
 });
 
-await refresh();
+await initialize();
 render();
 
+async function initialize() {
+  state.config = await fetch("/api/config").then((response) => response.json());
+  if (state.config.config_error) {
+    state.authMessage = "El despliegue no tiene configuradas las variables de Supabase.";
+    return;
+  }
+  if (!state.config.auth_enabled) {
+    await refresh();
+    return;
+  }
+  state.session = loadSession();
+  if (state.session && tokenExpiresSoon(state.session)) {
+    await refreshSession();
+  }
+  if (state.session) {
+    try {
+      await refresh();
+    } catch (error) {
+      clearSession();
+    }
+  }
+}
+
 async function api(path, options = {}) {
+  const headers = options.body instanceof FormData ? {} : { "Content-Type": "application/json" };
+  if (state.session?.access_token) headers.Authorization = `Bearer ${state.session.access_token}`;
   const response = await fetch(path, {
-    headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
+    headers,
     ...options
   });
+  if (response.status === 401 && state.session?.refresh_token && await refreshSession()) {
+    return api(path, options);
+  }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error inesperado." }));
     throw new Error(error.detail || "Error inesperado.");
@@ -83,6 +117,29 @@ function setView(view) {
 }
 
 function render() {
+  if (state.config?.config_error) {
+    document.body.classList.add("auth-screen");
+    app.innerHTML = `
+      <section class="auth-card">
+        <span class="eyebrow">Configuración incompleta</span>
+        <h2>Aplicación no disponible</h2>
+        <p>${escapeHtml(state.authMessage)}</p>
+      </section>
+    `;
+    return;
+  }
+  document.body.classList.toggle("auth-screen", Boolean(state.config?.auth_enabled && !state.session));
+  const account = document.querySelector("[data-user-account]");
+  if (account) {
+    account.hidden = !state.session;
+    account.querySelector("[data-user-email]").textContent = state.session?.user?.email || "";
+  }
+  if (state.config?.auth_enabled && !state.session) {
+    app.innerHTML = renderAuth();
+    bindAuthEvents();
+    return;
+  }
+
   if (state.view !== "training" && state.training?.timer) {
     clearInterval(state.training.timer);
     state.training = null;
@@ -103,6 +160,167 @@ function render() {
 
   bindEvents();
   drawCharts();
+}
+
+function renderAuth() {
+  const signingUp = state.authMode === "signup";
+  const recovering = state.authMode === "recovery";
+  return `
+    <section class="auth-card">
+      <div>
+        <span class="eyebrow">Tacx Flux Climber</span>
+        <h2>${recovering ? "Recuperar contraseña" : signingUp ? "Crear cuenta" : "Iniciar sesión"}</h2>
+        <p>${recovering ? "Te enviaremos un enlace para elegir una nueva contraseña." : signingUp ? "Tus rutas, actividades, ajustes y clave de OpenAI serán privados." : "Accede a tus rutas y entrenamientos."}</p>
+      </div>
+      <form data-auth-form>
+        <label>Correo electrónico<input type="email" name="email" autocomplete="email" required /></label>
+        ${recovering ? "" : `<label>Contraseña<input type="password" name="password" autocomplete="${signingUp ? "new-password" : "current-password"}" minlength="8" required /></label>`}
+        <button class="primary" type="submit">${recovering ? "Enviar enlace" : signingUp ? "Crear cuenta" : "Entrar"}</button>
+      </form>
+      ${state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : ""}
+      <div class="auth-links">
+        <button data-action="toggle-auth">${signingUp || recovering ? "Volver a iniciar sesión" : "Crear una cuenta"}</button>
+        ${!signingUp && !recovering ? `<button data-action="recover-password">He olvidado mi contraseña</button>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function bindAuthEvents() {
+  document.querySelector("[data-auth-form]")?.addEventListener("submit", submitAuth);
+  document.querySelector("[data-action='toggle-auth']")?.addEventListener("click", () => {
+    state.authMode = state.authMode === "login" ? "signup" : "login";
+    state.authMessage = "";
+    render();
+  });
+  document.querySelector("[data-action='recover-password']")?.addEventListener("click", () => {
+    state.authMode = "recovery";
+    state.authMessage = "";
+    render();
+  });
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const email = String(form.get("email") || "").trim();
+  const password = String(form.get("password") || "");
+  if (state.authMode === "recovery") {
+    const response = await fetch(`${state.config.supabase_url}/auth/v1/recover`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: state.config.supabase_publishable_key
+      },
+      body: JSON.stringify({ email, redirect_to: window.location.origin })
+    });
+    state.authMessage = response.ok
+      ? "Revisa tu correo para continuar."
+      : "No se ha podido enviar el enlace de recuperación.";
+    render();
+    return;
+  }
+  const signup = state.authMode === "signup";
+  const path = signup ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password";
+  const response = await fetch(`${state.config.supabase_url}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: state.config.supabase_publishable_key
+    },
+    body: JSON.stringify({ email, password })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    state.authMessage = result.msg || result.error_description || "No se ha podido completar la autenticación.";
+    render();
+    return;
+  }
+  const session = result.access_token ? result : result.session;
+  if (!session?.access_token) {
+    state.authMode = "login";
+    state.authMessage = "Cuenta creada. Confirma el correo recibido y después inicia sesión.";
+    render();
+    return;
+  }
+  saveSession(session);
+  state.authMessage = "";
+  await refresh();
+  render();
+}
+
+function loadSession() {
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  if (hash.get("access_token")) {
+    const session = {
+      access_token: hash.get("access_token"),
+      refresh_token: hash.get("refresh_token"),
+      expires_at: Math.floor(Date.now() / 1000) + Number(hash.get("expires_in") || 3600),
+      token_type: hash.get("token_type") || "bearer",
+      user: null
+    };
+    state.passwordRecovery = hash.get("type") === "recovery";
+    history.replaceState(null, "", window.location.pathname);
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    return session;
+  }
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(session) {
+  state.session = session;
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+function clearSession() {
+  state.session = null;
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+function tokenExpiresSoon(session) {
+  return !session.expires_at || session.expires_at * 1000 < Date.now() + 30000;
+}
+
+async function refreshSession() {
+  if (!state.session?.refresh_token) return false;
+  const response = await fetch(`${state.config.supabase_url}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: state.config.supabase_publishable_key
+    },
+    body: JSON.stringify({ refresh_token: state.session.refresh_token })
+  });
+  if (!response.ok) {
+    clearSession();
+    return false;
+  }
+  saveSession(await response.json());
+  return true;
+}
+
+async function logout() {
+  if (state.session?.access_token) {
+    await fetch(`${state.config.supabase_url}/auth/v1/logout`, {
+      method: "POST",
+      headers: {
+        apikey: state.config.supabase_publishable_key,
+        Authorization: `Bearer ${state.session.access_token}`
+      }
+    }).catch(() => {});
+  }
+  clearSession();
+  state.routes = [];
+  state.activities = [];
+  state.settings = null;
+  state.selectedRoute = null;
+  state.selectedActivity = null;
+  state.authMode = "login";
+  render();
 }
 
 function showMessage(message) {
@@ -371,6 +589,7 @@ function renderActivityModal() {
 
 function renderSettings() {
   const s = state.settings;
+  const keyStatus = s.openai_api_key_configured ? "Hay una clave guardada. Escribe otra solo para reemplazarla." : "No hay ninguna clave guardada.";
   return `
     <section>
       <header class="page-header">
@@ -379,13 +598,20 @@ function renderSettings() {
       </header>
       ${renderTrainerSettingsPanel()}
       <div class="panel form-grid settings-panel">
-        <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="${escapeAttr(s.openai_api_key)}" /></label>
+        <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="" autocomplete="off" placeholder="${s.openai_api_key_configured ? "Clave guardada" : "sk-..."}" /><small>${keyStatus}</small></label>
+        <label class="check wide"><input type="checkbox" name="clear_openai_api_key" /> Eliminar la clave de OpenAI guardada</label>
         <label>Pendiente máxima rodillo<input type="number" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /></label>
         <label>Peso ciclista<input type="number" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /></label>
         <label>Peso bici<input type="number" step="0.1" name="bike_weight_kg" value="${s.bike_weight_kg}" /></label>
         <label class="check"><input type="checkbox" name="enable_negative_grades" ${s.enable_negative_grades ? "checked" : ""} /> Pendientes negativas</label>
         <label class="check"><input type="checkbox" name="smooth_grade_changes" ${s.smooth_grade_changes ? "checked" : ""} /> Suavizar cambios</label>
       </div>
+      ${state.config.auth_enabled ? `
+        <div class="panel form-grid password-panel">
+          <label class="wide">${state.passwordRecovery ? "Elige tu nueva contraseña" : "Nueva contraseña"}<input type="password" name="new_password" minlength="8" autocomplete="new-password" /></label>
+          <button data-action="change-password">Cambiar contraseña</button>
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -495,6 +721,7 @@ function renderRouteForm(draft) {
 }
 
 function bindEvents() {
+  document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
   document.querySelectorAll("[data-view-action]").forEach((el) => el.addEventListener("click", () => setView(el.dataset.viewAction)));
   document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("click", async () => {
     state.selectedRoute = await api(`/api/routes/${el.dataset.openRoute}`);
@@ -576,6 +803,7 @@ function bindEvents() {
     if (state.selectedActivity) await deleteActivity(state.selectedActivity.activity.id);
   });
   document.querySelector("[data-action='save-settings']")?.addEventListener("click", saveSettings);
+  document.querySelector("[data-action='change-password']")?.addEventListener("click", changePassword);
 }
 
 function bindDropzone() {
@@ -1113,6 +1341,7 @@ async function saveSettings() {
   const root = document.querySelector(".settings-panel");
   state.settings = {
     openai_api_key: root.querySelector("[name='openai_api_key']").value,
+    clear_openai_api_key: root.querySelector("[name='clear_openai_api_key']").checked,
     max_trainer_grade_percent: Number(root.querySelector("[name='max_trainer_grade_percent']").value),
     enable_negative_grades: root.querySelector("[name='enable_negative_grades']").checked,
     smooth_grade_changes: root.querySelector("[name='smooth_grade_changes']").checked,
@@ -1121,6 +1350,33 @@ async function saveSettings() {
   };
   state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(state.settings) });
   showMessage("Ajustes guardados.");
+  render();
+}
+
+async function changePassword() {
+  const password = document.querySelector("[name='new_password']")?.value || "";
+  if (password.length < 8) {
+    showMessage("La nueva contraseña debe tener al menos 8 caracteres.");
+    render();
+    return;
+  }
+  const response = await fetch(`${state.config.supabase_url}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: state.config.supabase_publishable_key,
+      Authorization: `Bearer ${state.session.access_token}`
+    },
+    body: JSON.stringify({ password })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    showMessage(result.msg || result.error_description || "No se ha podido cambiar la contraseña.");
+    render();
+    return;
+  }
+  showMessage("Contraseña actualizada.");
+  state.passwordRecovery = false;
   render();
 }
 

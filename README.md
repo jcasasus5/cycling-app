@@ -1,8 +1,11 @@
 # Tacx Flux Climber
 
-Tacx Flux Climber es una aplicacion web local para entrenar en un rodillo inteligente usando perfiles reales de subida. Permite crear o importar rutas de altimetria, controlar la dureza del rodillo segun la pendiente de cada tramo, registrar la actividad y guardar entrenamientos completos o parciales.
+Tacx Flux Climber es una aplicacion web para entrenar en un rodillo inteligente usando perfiles reales de subida. Permite crear o importar rutas de altimetria, controlar la dureza del rodillo segun la pendiente de cada tramo, registrar la actividad y guardar entrenamientos completos o parciales.
 
-La app esta pensada para un uso domestico en ordenador, sin servidor externo propio. FastAPI sirve la aplicacion en local, SQLite guarda rutas/actividades/ajustes, y el navegador se conecta directamente al rodillo por Bluetooth.
+FastAPI sirve la aplicacion, el navegador se conecta directamente al rodillo por Bluetooth y existen dos modos:
+
+- Desarrollo local con SQLite y sin autenticacion.
+- Produccion en Vercel con Supabase Auth, PostgreSQL y aislamiento por usuario mediante RLS.
 
 ## Rodillos Compatibles
 
@@ -107,9 +110,31 @@ http://127.0.0.1:8000
 
 ## OpenAI
 
-La clave de OpenAI se configura desde `Ajustes`. Tambien puedes crear un `.env` desde `.env.example`, aunque la app lee y guarda los ajustes en SQLite.
+Cada usuario configura su propia clave de OpenAI desde `Ajustes`. En produccion se cifra antes de guardarla y nunca se devuelve al navegador despues de almacenarla. Un usuario no puede consultar ni usar la clave de otro.
 
 La clave solo se usa para analizar imagenes de perfiles de altimetria. El control del rodillo no usa OpenAI.
+
+## Despliegue Y Seguridad
+
+El despliegue de produccion usa:
+
+- Vercel conectado al repositorio de GitHub.
+- `main` como rama de produccion.
+- Supabase Auth con registro publico por correo y contraseña.
+- PostgreSQL con RLS en todas las tablas expuestas.
+- Una variable secreta `APP_ENCRYPTION_KEY` para cifrar las claves personales de OpenAI.
+
+Los forks de GitHub no tienen permiso para hacer push al repositorio original. Sus cambios solo pueden llegar mediante una pull request que el propietario revise y fusione. Un fork puede desplegar su propia copia, pero necesita crear su propio proyecto de Supabase y configurar sus propias variables.
+
+Los secretos no se guardan en Git. Las variables necesarias para produccion son:
+
+```text
+SUPABASE_URL
+SUPABASE_PUBLISHABLE_KEY
+APP_ENCRYPTION_KEY
+```
+
+La publishable key de Supabase puede aparecer en el navegador; la seguridad de los datos depende de la autenticacion y las politicas RLS. No se debe usar una `service_role` key en el frontend.
 
 ## Datos Locales
 
@@ -124,6 +149,8 @@ Puedes cambiar la ruta usando la variable de entorno:
 ```bash
 CYCLING_APP_DB=/ruta/a/otro.db
 ```
+
+El modo SQLite solo se activa fuera de Vercel. Un despliegue de Vercel sin variables de Supabase queda bloqueado para evitar que se publique accidentalmente sin autenticacion.
 
 ## Tests
 

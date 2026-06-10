@@ -14,6 +14,7 @@ from app.models import (
     ActivityDetail,
     ActivitySample,
     AppSettings,
+    AppSettingsUpdate,
     Route,
     RouteCreate,
     RouteSegment,
@@ -320,12 +321,23 @@ def get_settings() -> AppSettings:
             data[key] = float(row["value"])
         else:
             data[key] = row["value"]
+    data["openai_api_key_configured"] = bool(data["openai_api_key"])
     return AppSettings(**data)
 
 
-def update_settings(settings: AppSettings) -> AppSettings:
+def update_settings(settings: AppSettingsUpdate | AppSettings) -> AppSettings:
+    current = get_settings()
+    api_key = current.openai_api_key
+    if getattr(settings, "clear_openai_api_key", False):
+        api_key = ""
+    elif settings.openai_api_key.strip():
+        api_key = settings.openai_api_key.strip()
+    values = {
+        **settings.model_dump(exclude={"clear_openai_api_key", "openai_api_key_configured"}),
+        "openai_api_key": api_key,
+    }
     with connect() as conn:
-        for key, value in settings.model_dump().items():
+        for key, value in values.items():
             conn.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, serialize_setting_value(value)),

@@ -102,6 +102,17 @@ class ActivityDetail(BaseModel):
 
 class AppSettings(BaseModel):
     openai_api_key: str = ""
+    openai_api_key_configured: bool = False
+    max_trainer_grade_percent: float = 16
+    enable_negative_grades: bool = True
+    smooth_grade_changes: bool = True
+    rider_weight_kg: float = 75
+    bike_weight_kg: float = 9
+
+
+class AppSettingsUpdate(BaseModel):
+    openai_api_key: str = ""
+    clear_openai_api_key: bool = False
     max_trainer_grade_percent: float = 16
     enable_negative_grades: bool = True
     smooth_grade_changes: bool = True
