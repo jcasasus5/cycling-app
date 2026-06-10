@@ -117,6 +117,7 @@ function setView(view) {
 }
 
 function render() {
+  app.setAttribute("aria-busy", state.busyText ? "true" : "false");
   if (state.config?.config_error) {
     document.body.classList.add("auth-screen");
     app.innerHTML = `
@@ -136,6 +137,7 @@ function render() {
   }
   if (state.config?.auth_enabled && !state.session) {
     app.innerHTML = renderAuth();
+    if (state.busyText) app.insertAdjacentHTML("beforeend", renderBusyOverlay());
     bindAuthEvents();
     return;
   }
@@ -206,47 +208,47 @@ async function submitAuth(event) {
   const email = String(form.get("email") || "").trim();
   const password = String(form.get("password") || "");
   if (state.authMode === "recovery") {
-    const response = await fetch(`${state.config.supabase_url}/auth/v1/recover`, {
+    await withLoading("Enviando enlace de recuperación...", async () => {
+      const response = await fetch(`${state.config.supabase_url}/auth/v1/recover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: state.config.supabase_publishable_key
+        },
+        body: JSON.stringify({ email, redirect_to: window.location.origin })
+      });
+      state.authMessage = response.ok
+        ? "Revisa tu correo para continuar."
+        : "No se ha podido enviar el enlace de recuperación.";
+    }, showAuthError);
+    return;
+  }
+  const signup = state.authMode === "signup";
+  await withLoading(signup ? "Creando tu cuenta..." : "Iniciando sesión...", async () => {
+    const path = signup ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password";
+    const response = await fetch(`${state.config.supabase_url}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         apikey: state.config.supabase_publishable_key
       },
-      body: JSON.stringify({ email, redirect_to: window.location.origin })
+      body: JSON.stringify({ email, password })
     });
-    state.authMessage = response.ok
-      ? "Revisa tu correo para continuar."
-      : "No se ha podido enviar el enlace de recuperación.";
-    render();
-    return;
-  }
-  const signup = state.authMode === "signup";
-  const path = signup ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password";
-  const response = await fetch(`${state.config.supabase_url}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: state.config.supabase_publishable_key
-    },
-    body: JSON.stringify({ email, password })
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    state.authMessage = result.msg || result.error_description || "No se ha podido completar la autenticación.";
-    render();
-    return;
-  }
-  const session = result.access_token ? result : result.session;
-  if (!session?.access_token) {
-    state.authMode = "login";
-    state.authMessage = "Cuenta creada. Confirma el correo recibido y después inicia sesión.";
-    render();
-    return;
-  }
-  saveSession(session);
-  state.authMessage = "";
-  await refresh();
-  render();
+    const result = await response.json();
+    if (!response.ok) {
+      state.authMessage = result.msg || result.error_description || "No se ha podido completar la autenticación.";
+      return;
+    }
+    const session = result.access_token ? result : result.session;
+    if (!session?.access_token) {
+      state.authMode = "login";
+      state.authMessage = "Cuenta creada. Confirma el correo recibido y después inicia sesión.";
+      return;
+    }
+    saveSession(session);
+    state.authMessage = "";
+    await refresh();
+  }, showAuthError);
 }
 
 function loadSession() {
@@ -304,23 +306,47 @@ async function refreshSession() {
 }
 
 async function logout() {
-  if (state.session?.access_token) {
-    await fetch(`${state.config.supabase_url}/auth/v1/logout`, {
-      method: "POST",
-      headers: {
-        apikey: state.config.supabase_publishable_key,
-        Authorization: `Bearer ${state.session.access_token}`
-      }
-    }).catch(() => {});
-  }
-  clearSession();
-  state.routes = [];
-  state.activities = [];
-  state.settings = null;
-  state.selectedRoute = null;
-  state.selectedActivity = null;
-  state.authMode = "login";
+  await withLoading("Cerrando sesión...", async () => {
+    if (state.session?.access_token) {
+      await fetch(`${state.config.supabase_url}/auth/v1/logout`, {
+        method: "POST",
+        headers: {
+          apikey: state.config.supabase_publishable_key,
+          Authorization: `Bearer ${state.session.access_token}`
+        }
+      }).catch(() => {});
+    }
+    clearSession();
+    state.routes = [];
+    state.activities = [];
+    state.settings = null;
+    state.selectedRoute = null;
+    state.selectedActivity = null;
+    state.authMode = "login";
+  });
+}
+
+async function withLoading(text, operation, onError = showOperationError) {
+  if (state.busyText) return undefined;
+  state.busyText = text;
   render();
+  try {
+    return await operation();
+  } catch (error) {
+    onError(error);
+    return undefined;
+  } finally {
+    state.busyText = "";
+    render();
+  }
+}
+
+function showOperationError(error) {
+  showMessage(error?.message || "No se ha podido completar la operación.");
+}
+
+function showAuthError(error) {
+  state.authMessage = error?.message || "No se ha podido completar la autenticación.";
 }
 
 function showMessage(message) {
@@ -432,9 +458,9 @@ function renderRouteModal() {
 
 function renderBusyOverlay() {
   return `
-    <div class="busy-overlay" role="status" aria-live="polite">
+    <div class="busy-overlay" role="status" aria-live="polite" aria-modal="true">
       <div class="busy-dialog">
-        <div class="spinner"></div>
+        <div class="spinner" aria-hidden="true"></div>
         <strong>${escapeHtml(state.busyText)}</strong>
         <span>No cierres esta pantalla hasta que termine.</span>
       </div>
@@ -724,11 +750,12 @@ function bindEvents() {
   document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
   document.querySelectorAll("[data-view-action]").forEach((el) => el.addEventListener("click", () => setView(el.dataset.viewAction)));
   document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("click", async () => {
-    state.selectedRoute = await api(`/api/routes/${el.dataset.openRoute}`);
-    state.draft = routeToDraft(state.selectedRoute);
-    state.routeDirty = false;
-    state.routeModalOpen = true;
-    render();
+    await withLoading("Cargando ruta...", async () => {
+      state.selectedRoute = await api(`/api/routes/${el.dataset.openRoute}`);
+      state.draft = routeToDraft(state.selectedRoute);
+      state.routeDirty = false;
+      state.routeModalOpen = true;
+    });
   }));
   document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -736,10 +763,11 @@ function bindEvents() {
     el.click();
   }));
   document.querySelectorAll("[data-open-activity]").forEach((el) => el.addEventListener("click", async () => {
-    state.selectedActivity = await api(`/api/activities/${el.dataset.openActivity}`);
-    state.selectedRoute = await api(`/api/routes/${state.selectedActivity.activity.route_id}`);
-    state.activityModalOpen = true;
-    render();
+    await withLoading("Cargando actividad...", async () => {
+      state.selectedActivity = await api(`/api/activities/${el.dataset.openActivity}`);
+      state.selectedRoute = await api(`/api/routes/${state.selectedActivity.activity.route_id}`);
+      state.activityModalOpen = true;
+    });
   }));
   document.querySelectorAll("[data-open-activity]").forEach((el) => el.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -947,51 +975,60 @@ function validateRouteDraft(draft) {
 async function saveDraft() {
   syncDraftFromForm();
   if (!validateRouteDraft(state.draft)) return;
-  state.selectedRoute = await api("/api/routes", { method: "POST", body: JSON.stringify(state.draft) });
-  state.draft = routeToDraft(state.selectedRoute);
-  state.routeDirty = false;
-  state.routeModalOpen = true;
-  await refresh();
-  setView("routes");
+  await withLoading("Guardando ruta...", async () => {
+    state.selectedRoute = await api("/api/routes", { method: "POST", body: JSON.stringify(state.draft) });
+    state.draft = routeToDraft(state.selectedRoute);
+    state.routeDirty = false;
+    state.routeModalOpen = true;
+    await refresh();
+    setView("routes");
+  });
 }
 
 async function updateRoute() {
   syncDraftFromForm();
   if (!validateRouteDraft(state.draft)) return;
-  state.selectedRoute = await api(`/api/routes/${state.selectedRoute.id}`, { method: "PUT", body: JSON.stringify(state.draft) });
-  state.draft = routeToDraft(state.selectedRoute);
-  state.routeDirty = false;
-  await refresh();
-  render();
+  await withLoading("Guardando cambios...", async () => {
+    state.selectedRoute = await api(`/api/routes/${state.selectedRoute.id}`, { method: "PUT", body: JSON.stringify(state.draft) });
+    state.draft = routeToDraft(state.selectedRoute);
+    state.routeDirty = false;
+    await refresh();
+  });
 }
 
 async function duplicateRoute() {
-  state.selectedRoute = await api(`/api/routes/${state.selectedRoute.id}/duplicate`, { method: "POST" });
-  state.draft = routeToDraft(state.selectedRoute);
-  state.routeDirty = false;
-  state.routeModalOpen = true;
-  await refresh();
-  setView("routes");
+  await withLoading("Duplicando ruta...", async () => {
+    state.selectedRoute = await api(`/api/routes/${state.selectedRoute.id}/duplicate`, { method: "POST" });
+    state.draft = routeToDraft(state.selectedRoute);
+    state.routeDirty = false;
+    state.routeModalOpen = true;
+    await refresh();
+    setView("routes");
+  });
 }
 
 async function deleteRoute() {
-  await api(`/api/routes/${state.selectedRoute.id}`, { method: "DELETE" });
-  state.selectedRoute = null;
-  state.routeModalOpen = false;
-  state.routeDirty = false;
-  await refresh();
-  setView("routes");
+  await withLoading("Eliminando ruta...", async () => {
+    await api(`/api/routes/${state.selectedRoute.id}`, { method: "DELETE" });
+    state.selectedRoute = null;
+    state.routeModalOpen = false;
+    state.routeDirty = false;
+    await refresh();
+    setView("routes");
+  });
 }
 
 async function deleteActivity(activityId) {
-  await api(`/api/activities/${activityId}`, { method: "DELETE" });
-  if (state.selectedActivity?.activity.id === activityId) {
-    state.selectedActivity = null;
-    state.selectedRoute = null;
-    state.activityModalOpen = false;
-  }
-  await refresh();
-  setView("activities");
+  await withLoading("Eliminando actividad...", async () => {
+    await api(`/api/activities/${activityId}`, { method: "DELETE" });
+    if (state.selectedActivity?.activity.id === activityId) {
+      state.selectedActivity = null;
+      state.selectedRoute = null;
+      state.activityModalOpen = false;
+    }
+    await refresh();
+    setView("activities");
+  });
 }
 
 async function analyzeImage() {
@@ -1003,18 +1040,11 @@ async function analyzeImage() {
   }
   const formData = new FormData();
   formData.append("file", file);
-  state.busyText = "Analizando imagen con OpenAI...";
-  render();
-  try {
+  await withLoading("Analizando imagen con OpenAI...", async () => {
     const result = await api("/api/import/image", { method: "POST", body: formData });
     state.draft = result.draft;
     showMessage("Imagen analizada. Revisa los datos antes de guardar.");
-  } catch (error) {
-    showMessage(error.message);
-  } finally {
-    state.busyText = "";
-  }
-  render();
+  });
 }
 
 function resetTraining() {
@@ -1048,57 +1078,58 @@ async function connectTrainer() {
   if (state.trainer.connecting || state.trainer.connected) return;
   state.trainer.connecting = true;
   state.trainer.status = "Preparando Bluetooth...";
-  render();
-  try {
-    trainerClient = new FtmsTrainer({
-      onData: handleTrainerData,
-      onStatus: (status) => {
-        state.trainer.status = status;
-        render();
-      },
-      onMachineStatus: handleTrainerMachineStatus,
-      onDisconnect: () => {
-        state.trainer.connected = false;
-        state.trainer.connecting = false;
-        state.trainer.metrics = emptyTrainerMetrics();
-        state.trainer.lastDataAt = null;
-        state.trainer.features = null;
-        state.calibration = emptyCalibrationState();
-        if (state.training?.running) {
-          state.training.running = false;
-          clearInterval(state.training.timer);
-          state.training.timer = null;
+  await withLoading("Conectando con el rodillo...", async () => {
+    try {
+      trainerClient = new FtmsTrainer({
+        onData: handleTrainerData,
+        onStatus: (status) => {
+          state.trainer.status = status;
+          render();
+        },
+        onMachineStatus: handleTrainerMachineStatus,
+        onDisconnect: () => {
+          state.trainer.connected = false;
+          state.trainer.connecting = false;
+          state.trainer.metrics = emptyTrainerMetrics();
+          state.trainer.lastDataAt = null;
+          state.trainer.features = null;
+          state.calibration = emptyCalibrationState();
+          if (state.training?.running) {
+            state.training.running = false;
+            clearInterval(state.training.timer);
+            state.training.timer = null;
+          }
+          render();
         }
-        render();
-      }
-    });
-    await trainerClient.connect();
-    state.trainer.connected = true;
-    state.trainer.connecting = false;
-    state.trainer.features = trainerClient.features;
-    await sendCurrentGradeToTrainer(true);
-    showMessage("Tacx conectado. Ya puedes iniciar el entrenamiento.");
-  } catch (error) {
-    state.trainer.connected = false;
-    state.trainer.connecting = false;
-    state.trainer.status = "Rodillo no conectado";
-    showMessage(error.message);
-  }
-  render();
+      });
+      await trainerClient.connect();
+      state.trainer.connected = true;
+      state.trainer.connecting = false;
+      state.trainer.features = trainerClient.features;
+      await sendCurrentGradeToTrainer(true);
+      showMessage("Tacx conectado. Ya puedes iniciar el entrenamiento.");
+    } catch (error) {
+      state.trainer.connected = false;
+      state.trainer.connecting = false;
+      state.trainer.status = "Rodillo no conectado";
+      showMessage(error.message);
+    }
+  });
 }
 
 async function disconnectTrainer() {
   if (!trainerClient) return;
-  await trainerClient.disconnect();
-  trainerClient = null;
-  state.trainer.connected = false;
-  state.trainer.connecting = false;
-  state.trainer.status = "Rodillo no conectado";
-  state.trainer.metrics = emptyTrainerMetrics();
-  state.trainer.lastDataAt = null;
-  state.trainer.features = null;
-  state.calibration = emptyCalibrationState();
-  render();
+  await withLoading("Desconectando rodillo...", async () => {
+    await trainerClient.disconnect();
+    trainerClient = null;
+    state.trainer.connected = false;
+    state.trainer.connecting = false;
+    state.trainer.status = "Rodillo no conectado";
+    state.trainer.metrics = emptyTrainerMetrics();
+    state.trainer.lastDataAt = null;
+    state.trainer.features = null;
+    state.calibration = emptyCalibrationState();
+  });
 }
 
 function handleTrainerData(metrics) {
@@ -1161,21 +1192,22 @@ async function startCalibrationCommand() {
   state.calibration.message = "Acelera suavemente hasta la velocidad objetivo.";
   state.calibration.result = "";
   render();
-  try {
-    const result = await trainerClient.startSpinDownCalibration();
-    state.calibration.targetSpeedKph = result.targetSpeedKph || 30;
-    state.calibration.lowSpeedKph = result.lowSpeedKph;
-    state.calibration.highSpeedKph = result.highSpeedKph;
-    state.calibration.status = "Acelerando";
-    state.calibration.message = `Acelera hasta entrar en ${formatCalibrationSpeedTarget(state.calibration)} y despues deja de pedalear cuando se indique.`;
-  } catch (error) {
-    state.calibration.running = false;
-    state.calibration.step = "error";
-    state.calibration.status = "No disponible";
-    state.calibration.result = "No iniciada";
-    state.calibration.message = error.message;
-  }
-  render();
+  await withLoading("Iniciando calibración...", async () => {
+    try {
+      const result = await trainerClient.startSpinDownCalibration();
+      state.calibration.targetSpeedKph = result.targetSpeedKph || 30;
+      state.calibration.lowSpeedKph = result.lowSpeedKph;
+      state.calibration.highSpeedKph = result.highSpeedKph;
+      state.calibration.status = "Acelerando";
+      state.calibration.message = `Acelera hasta entrar en ${formatCalibrationSpeedTarget(state.calibration)} y despues deja de pedalear cuando se indique.`;
+    } catch (error) {
+      state.calibration.running = false;
+      state.calibration.step = "error";
+      state.calibration.status = "No disponible";
+      state.calibration.result = "No iniciada";
+      state.calibration.message = error.message;
+    }
+  });
 }
 
 function updateCalibrationFromSpeed() {
@@ -1203,25 +1235,21 @@ async function toggleTraining() {
     return;
   }
   if (!state.training.running) {
-    try {
+    await withLoading("Iniciando entrenamiento...", async () => {
       await trainerClient?.start();
       await sendCurrentGradeToTrainer(true);
-    } catch (error) {
-      showMessage(error.message);
-      render();
-      return;
-    }
-    state.training.running = true;
-    state.training.timer = setInterval(() => {
-      tickTraining();
-    }, 1000);
+      state.training.running = true;
+      state.training.timer = setInterval(() => {
+        tickTraining();
+      }, 1000);
+    });
   } else {
     state.training.running = false;
     clearInterval(state.training.timer);
     state.training.timer = null;
     neutralizeTrainer().catch((error) => showMessage(error.message));
+    render();
   }
-  render();
 }
 
 async function tickTraining() {
@@ -1289,29 +1317,29 @@ async function saveActivity(status) {
   const route = state.selectedRoute;
   const t = state.training;
   if (!t || state.savingActivity) return;
-  if (t.timer) clearInterval(t.timer);
-  t.running = false;
-  await neutralizeTrainer();
-  const activeSamples = t.samples.filter((sample) => !sample.paused);
-  const averages = calculateAverages(activeSamples);
-  const lastAltitude = t.samples.at(-1)?.altitude_m ?? route.start_altitude_m;
-  const payload = {
-    route_id: route.id,
-    started_at: t.startedAt ?? new Date(Date.now() - t.elapsed * 1000).toISOString(),
-    ended_at: new Date().toISOString(),
-    status,
-    active_seconds: t.activeSeconds,
-    total_seconds: t.elapsed,
-    distance_km: Number(t.km.toFixed(2)),
-    completed_elevation_m: Math.max(0, lastAltitude - route.start_altitude_m),
-    samples: t.samples,
-    ...averages
-  };
-  const path = t.activityId ? `/api/activities/${t.activityId}` : "/api/activities";
   state.savingActivity = true;
   state.busyText = status === "completed" ? "Guardando actividad completada..." : "Guardando actividad parcial...";
   render();
   try {
+    if (t.timer) clearInterval(t.timer);
+    t.running = false;
+    await neutralizeTrainer();
+    const activeSamples = t.samples.filter((sample) => !sample.paused);
+    const averages = calculateAverages(activeSamples);
+    const lastAltitude = t.samples.at(-1)?.altitude_m ?? route.start_altitude_m;
+    const payload = {
+      route_id: route.id,
+      started_at: t.startedAt ?? new Date(Date.now() - t.elapsed * 1000).toISOString(),
+      ended_at: new Date().toISOString(),
+      status,
+      active_seconds: t.activeSeconds,
+      total_seconds: t.elapsed,
+      distance_km: Number(t.km.toFixed(2)),
+      completed_elevation_m: Math.max(0, lastAltitude - route.start_altitude_m),
+      samples: t.samples,
+      ...averages
+    };
+    const path = t.activityId ? `/api/activities/${t.activityId}` : "/api/activities";
     await api(path, { method: t.activityId ? "PUT" : "POST", body: JSON.stringify(payload) });
     state.training = null;
     state.resumeActivity = null;
@@ -1339,7 +1367,7 @@ async function neutralizeTrainer() {
 
 async function saveSettings() {
   const root = document.querySelector(".settings-panel");
-  state.settings = {
+  const settings = {
     openai_api_key: root.querySelector("[name='openai_api_key']").value,
     clear_openai_api_key: root.querySelector("[name='clear_openai_api_key']").checked,
     max_trainer_grade_percent: Number(root.querySelector("[name='max_trainer_grade_percent']").value),
@@ -1348,9 +1376,10 @@ async function saveSettings() {
     rider_weight_kg: Number(root.querySelector("[name='rider_weight_kg']").value),
     bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
   };
-  state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(state.settings) });
-  showMessage("Ajustes guardados.");
-  render();
+  await withLoading("Guardando ajustes...", async () => {
+    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(settings) });
+    showMessage("Ajustes guardados.");
+  });
 }
 
 async function changePassword() {
@@ -1360,24 +1389,23 @@ async function changePassword() {
     render();
     return;
   }
-  const response = await fetch(`${state.config.supabase_url}/auth/v1/user`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: state.config.supabase_publishable_key,
-      Authorization: `Bearer ${state.session.access_token}`
-    },
-    body: JSON.stringify({ password })
+  await withLoading("Actualizando contraseña...", async () => {
+    const response = await fetch(`${state.config.supabase_url}/auth/v1/user`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: state.config.supabase_publishable_key,
+        Authorization: `Bearer ${state.session.access_token}`
+      },
+      body: JSON.stringify({ password })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.msg || result.error_description || "No se ha podido cambiar la contraseña.");
+    }
+    showMessage("Contraseña actualizada.");
+    state.passwordRecovery = false;
   });
-  const result = await response.json();
-  if (!response.ok) {
-    showMessage(result.msg || result.error_description || "No se ha podido cambiar la contraseña.");
-    render();
-    return;
-  }
-  showMessage("Contraseña actualizada.");
-  state.passwordRecovery = false;
-  render();
 }
 
 function drawCharts() {
