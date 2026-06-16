@@ -16,6 +16,10 @@ def test_update_settings_persists_booleans_and_numbers(tmp_path):
                 smooth_grade_changes=True,
                 rider_weight_kg=66.5,
                 bike_weight_kg=8.7,
+                ftp_w=238,
+                ftp_updated_at="2026-06-17T10:00:00Z",
+                ftp_method="ramp",
+                ftp_test_history=[{"method": "ramp", "ftp_w": 238}],
             )
         )
 
@@ -26,6 +30,10 @@ def test_update_settings_persists_booleans_and_numbers(tmp_path):
         assert settings.smooth_grade_changes is True
         assert settings.rider_weight_kg == 66.5
         assert settings.bike_weight_kg == 8.7
+        assert settings.ftp_w == 238
+        assert settings.ftp_updated_at == "2026-06-17T10:00:00Z"
+        assert settings.ftp_method == "ramp"
+        assert settings.ftp_test_history == [{"method": "ramp", "ftp_w": 238}]
     finally:
         db.DB_PATH = original_db_path
 

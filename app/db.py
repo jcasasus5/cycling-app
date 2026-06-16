@@ -319,6 +319,11 @@ def get_settings() -> AppSettings:
             data[key] = row["value"].strip().lower() in {"true", "1", "yes", "on"}
         elif isinstance(default, (int, float)):
             data[key] = float(row["value"])
+        elif isinstance(default, (dict, list)):
+            try:
+                data[key] = json.loads(row["value"])
+            except json.JSONDecodeError:
+                data[key] = default
         else:
             data[key] = row["value"]
     data["openai_api_key_configured"] = bool(data["openai_api_key"])

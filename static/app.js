@@ -4,9 +4,20 @@ const app = document.querySelector("#app");
 const navButtons = document.querySelectorAll("[data-view]");
 const MESSAGE_DURATION_MS = 4600;
 const SESSION_STORAGE_KEY = "cycling-app-supabase-session";
+const FTP_TEST_HISTORY_LIMIT = 12;
+const FTP_ZONE_DEFINITIONS = [
+  ["Z1", "Recuperacion", 0, 0.55],
+  ["Z2", "Resistencia", 0.55, 0.75],
+  ["Z3", "Tempo", 0.76, 0.87],
+  ["SS", "Sweet Spot", 0.88, 0.94],
+  ["Z4", "Umbral", 0.95, 1.05],
+  ["Z5", "VO2 Max", 1.06, 1.2],
+  ["Z6", "Anaerobico", 1.21, null]
+];
 let messageTimer = null;
 let trainerClient = null;
 let gradeCommandPending = false;
+let targetPowerCommandPending = false;
 
 const state = {
   config: null,
@@ -32,6 +43,7 @@ const state = {
     features: null
   },
   calibration: emptyCalibrationState(),
+  profileTest: emptyProfileTestState(),
   resumeActivity: null,
   routeModalOpen: false,
   activityModalOpen: false,
@@ -152,6 +164,7 @@ function render() {
   if (state.view === "route-detail") app.innerHTML = renderRouteDetail();
   if (state.view === "training") app.innerHTML = renderTraining();
   if (state.view === "activities") app.innerHTML = renderActivities();
+  if (state.view === "profile") app.innerHTML = renderProfile();
   if (state.view === "settings") app.innerHTML = renderSettings();
 
   if (state.routeModalOpen && state.selectedRoute) app.insertAdjacentHTML("beforeend", renderRouteModal());
@@ -642,6 +655,201 @@ function renderSettings() {
   `;
 }
 
+function renderProfile() {
+  const ftp = currentFtp();
+  const weight = Number(state.settings?.rider_weight_kg || 0);
+  const wattsPerKg = ftp && weight ? (ftp / weight).toFixed(2) : "-";
+  const updatedAt = state.settings?.ftp_updated_at ? new Date(state.settings.ftp_updated_at).toLocaleDateString("es-ES") : "Sin test";
+  const method = formatFtpMethod(state.settings?.ftp_method || "");
+  return `
+    <section>
+      <header class="page-header">
+        <div>
+          <span class="eyebrow">Perfil</span>
+          <h2>FTP y zonas</h2>
+          <p>${ftp ? `${ftp} W · ${wattsPerKg} W/kg · ${method}` : "Sin FTP guardado"}</p>
+        </div>
+        <div class="actions">
+          <button data-action="connect-trainer" ${state.trainer.connecting || state.trainer.connected ? "disabled" : ""}>${state.trainer.connecting ? "Conectando..." : state.trainer.connected ? "Rodillo conectado" : "Conectar rodillo"}</button>
+          <button data-action="disconnect-trainer" ${state.trainer.connected ? "" : "disabled"}>Desconectar</button>
+        </div>
+      </header>
+      <div class="dashboard-strip">
+        ${metric("FTP actual", ftp ? `${ftp} W` : "-")}
+        ${metric("Potencia/peso", wattsPerKg === "-" ? "-" : `${wattsPerKg} W/kg`)}
+        ${metric("Ultimo test", updatedAt)}
+        ${metric("Metodo", method || "-")}
+      </div>
+      <div class="profile-layout">
+        <div class="profile-main">
+          ${renderFtpTestPanel()}
+          ${renderPowerZones(ftp)}
+        </div>
+        <aside class="profile-side">
+          ${renderManualFtpPanel()}
+          ${renderProfileTrainerPanel()}
+          ${renderFtpHistory()}
+        </aside>
+      </div>
+    </section>
+  `;
+}
+
+function renderFtpTestPanel() {
+  const t = state.profileTest;
+  const running = t.running;
+  const mode = t.mode || "ramp";
+  const phaseLabel = formatTestPhase(t.phase);
+  const elapsed = running || t.phase === "done" ? formatSeconds(t.elapsed) : "-";
+  const phaseElapsed = running ? formatSeconds(t.phaseElapsed) : "-";
+  const target = t.targetPowerW ? `${t.targetPowerW} W` : "Libre";
+  const currentPower = Math.round(state.trainer.metrics.power_w || 0);
+  const currentCadence = Math.round(state.trainer.metrics.cadence_rpm || 0);
+  const bestMinute = bestRollingAverage(t.samples.filter((sample) => sample.phase === "test"), 60);
+  const liveRampFtp = mode === "ramp" && bestMinute ? Math.round(bestMinute * 0.75) : 0;
+  const testPower = t.samples.filter((sample) => sample.phase === "test").map((sample) => sample.power_w);
+  const liveTwentyFtp = mode === "twenty" && testPower.length ? Math.round(average(testPower) * 0.95) : 0;
+  const liveEstimate = liveRampFtp || liveTwentyFtp;
+  const ergStatus = t.ergAttempted ? (t.ergEnabled ? "ERG activo" : "Objetivo manual") : "Pendiente";
+  return `
+    <div class="panel ftp-test-panel">
+      <div class="form-section-title">
+        <div>
+          <span class="eyebrow">Test guiado</span>
+          <h3>${running ? `${formatFtpMethod(mode)} en marcha` : "Elige un protocolo"}</h3>
+          <p>${escapeHtml(t.message || "Calienta el rodillo, conecta el Tacx y usa un protocolo repetible para comparar tu forma.")}</p>
+        </div>
+        <span class="status-chip ${running ? "partial" : ""}">${running ? phaseLabel : "Listo"}</span>
+      </div>
+      <div class="test-selector">
+        <button class="${mode === "ramp" ? "active" : ""}" data-action="select-ftp-test" data-test-mode="ramp" ${running ? "disabled" : ""}>Ramp test</button>
+        <button class="${mode === "twenty" ? "active" : ""}" data-action="select-ftp-test" data-test-mode="twenty" ${running ? "disabled" : ""}>20 min</button>
+      </div>
+      <div class="protocol-box">
+        ${mode === "ramp" ? renderRampProtocol() : renderTwentyProtocol()}
+      </div>
+      <div class="metrics">
+        ${metric("Fase", phaseLabel)}
+        ${metric("Tiempo total", elapsed)}
+        ${metric("Tiempo fase", phaseElapsed)}
+        ${metric("Objetivo", target)}
+        ${metric("Potencia", `${currentPower} W`)}
+        ${metric("Cadencia", `${currentCadence} rpm`)}
+        ${metric("Modo rodillo", ergStatus)}
+        ${metric("FTP estimado", liveEstimate ? `${liveEstimate} W` : "-")}
+      </div>
+      ${t.result ? renderFtpResult(t.result) : ""}
+      <div class="bottom-actions ftp-actions">
+        ${running ? `
+          ${mode === "ramp" && t.phase === "test" ? `<button class="primary" data-action="finish-ftp-test">No puedo mas</button>` : ""}
+          <button class="danger" data-action="cancel-ftp-test">Cancelar test</button>
+        ` : `
+          <button class="primary large-action" data-action="start-ftp-test" data-test-mode="${mode}" ${state.trainer.connected ? "" : "disabled"}>Iniciar ${formatFtpMethod(mode)}</button>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function renderRampProtocol() {
+  const start = rampStartPower();
+  const step = rampStepPower();
+  return `
+    <div>
+      <strong>Ramp test</strong>
+      <p>5 min de calentamiento, despues ${start} W y +${step} W cada minuto hasta que no puedas mantener el esfuerzo. FTP = 75% de la mejor potencia media de 60 s.</p>
+    </div>
+  `;
+}
+
+function renderTwentyProtocol() {
+  const guidePower = currentFtp() ? `${Math.round(currentFtp() * 0.95)}-${Math.round(currentFtp() * 1.05)} W` : "tu maximo sostenible";
+  return `
+    <div>
+      <strong>20 minutos</strong>
+      <p>10 min de calentamiento controlado, despues 20 min a ${guidePower}. Durante el esfuerzo el rodillo queda libre para no limitar tu potencia. FTP = 95% de la media de esos 20 min.</p>
+    </div>
+  `;
+}
+
+function renderFtpResult(result) {
+  return `
+    <div class="test-result">
+      <strong>${result.ftp_w} W FTP</strong>
+      <span>${formatFtpMethod(result.method)} · ${result.source_power_w} W de referencia · ${formatSeconds(result.duration_seconds)}</span>
+    </div>
+  `;
+}
+
+function renderPowerZones(ftp) {
+  const rows = FTP_ZONE_DEFINITIONS.map(([code, label, low, high]) => {
+    const lowW = ftp && low ? Math.ceil(ftp * low) : 0;
+    const highW = ftp && high ? Math.floor(ftp * high) : null;
+    const range = !ftp ? "-" : highW === null ? `${lowW}+ W` : low === 0 ? `< ${highW} W` : `${lowW}-${highW} W`;
+    const percent = high === null ? `${Math.round(low * 100)}%+` : low === 0 ? `< ${Math.round(high * 100)}%` : `${Math.round(low * 100)}-${Math.round(high * 100)}%`;
+    return `
+      <div class="zone-row">
+        <strong>${code}</strong>
+        <span>${label}</span>
+        <span>${percent}</span>
+        <b>${range}</b>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="panel zones-panel">
+      <div>
+        <span class="eyebrow">Zonas de potencia</span>
+        <h3>Entrenamiento por FTP</h3>
+      </div>
+      <div class="zone-table">${rows}</div>
+    </div>
+  `;
+}
+
+function renderManualFtpPanel() {
+  return `
+    <div class="panel manual-ftp-panel">
+      <span class="eyebrow">Ajuste manual</span>
+      <label>FTP conocido<input type="number" min="0" step="1" name="manual_ftp_w" value="${currentFtp() || ""}" placeholder="Ej. 220" /></label>
+      <button data-action="save-manual-ftp">Guardar FTP manual</button>
+    </div>
+  `;
+}
+
+function renderProfileTrainerPanel() {
+  const range = state.trainer.features?.powerRange;
+  const rangeLabel = range ? `${range.minPowerW}-${range.maxPowerW} W` : "No anunciado";
+  return `
+    <div class="panel trainer-panel">
+      <span class="eyebrow">Rodillo</span>
+      <strong>${escapeHtml(state.trainer.status)}</strong>
+      <p>${state.trainer.connected ? "FTMS conectado. La app intentara usar ERG para los objetivos de calentamiento y ramp test." : "Conecta el Tacx con Chrome o Edge antes de iniciar un test."}</p>
+      <div class="metrics compact">
+        ${metric("Rango ERG", rangeLabel)}
+        ${metric("Potencia", `${Math.round(state.trainer.metrics.power_w || 0)} W`)}
+      </div>
+    </div>
+  `;
+}
+
+function renderFtpHistory() {
+  const history = [...(state.settings?.ftp_test_history || [])].slice(0, FTP_TEST_HISTORY_LIMIT);
+  const rows = history.map((item) => `
+    <div class="history-row">
+      <strong>${Number(item.ftp_w || 0)} W</strong>
+      <span>${formatFtpMethod(String(item.method || ""))}</span>
+      <span>${item.completed_at ? new Date(String(item.completed_at)).toLocaleDateString("es-ES") : "-"}</span>
+    </div>
+  `).join("");
+  return `
+    <div class="panel history-panel">
+      <span class="eyebrow">Historial</span>
+      ${rows || `<p>No hay tests guardados.</p>`}
+    </div>
+  `;
+}
+
 function renderTrainerSettingsPanel() {
   const metrics = state.trainer.metrics;
   const calibrationDisabled = !state.trainer.connected || state.trainer.features?.spinDownControl === false;
@@ -830,6 +1038,18 @@ function bindEvents() {
   document.querySelector("[data-action='delete-current-activity']")?.addEventListener("click", async () => {
     if (state.selectedActivity) await deleteActivity(state.selectedActivity.activity.id);
   });
+  document.querySelectorAll("[data-action='select-ftp-test']").forEach((el) => el.addEventListener("click", () => {
+    if (state.profileTest.running) return;
+    state.profileTest.mode = el.dataset.testMode;
+    state.profileTest.result = null;
+    render();
+  }));
+  document.querySelector("[data-action='start-ftp-test']")?.addEventListener("click", (event) => {
+    startFtpTest(event.currentTarget.dataset.testMode);
+  });
+  document.querySelector("[data-action='finish-ftp-test']")?.addEventListener("click", () => finishFtpTest("manual"));
+  document.querySelector("[data-action='cancel-ftp-test']")?.addEventListener("click", cancelFtpTest);
+  document.querySelector("[data-action='save-manual-ftp']")?.addEventListener("click", saveManualFtp);
   document.querySelector("[data-action='save-settings']")?.addEventListener("click", saveSettings);
   document.querySelector("[data-action='change-password']")?.addEventListener("click", changePassword);
 }
@@ -1099,6 +1319,15 @@ async function connectTrainer() {
             clearInterval(state.training.timer);
             state.training.timer = null;
           }
+          if (state.profileTest.running) {
+            clearInterval(state.profileTest.timer);
+            state.profileTest = {
+              ...state.profileTest,
+              running: false,
+              timer: null,
+              message: "El rodillo se ha desconectado y el test se ha detenido."
+            };
+          }
           render();
         }
       });
@@ -1140,7 +1369,7 @@ function handleTrainerData(metrics) {
   state.trainer.lastDataAt = Date.now();
   updateCalibrationFromSpeed();
   if (state.training) syncTrainingFromTrainer();
-  if ((state.calibration.open || state.view === "settings") && !state.message) render();
+  if ((state.calibration.open || state.view === "settings" || state.view === "profile") && !state.message) render();
 }
 
 function handleTrainerMachineStatus(status) {
@@ -1365,6 +1594,257 @@ async function neutralizeTrainer() {
   }
 }
 
+async function startFtpTest(mode = "ramp") {
+  if (!state.trainer.connected || !trainerClient?.connected) {
+    showMessage("Conecta el rodillo antes de iniciar el test.");
+    render();
+    return;
+  }
+  if (state.training?.running) {
+    showMessage("Termina el entrenamiento de ruta antes de iniciar un test FTP.");
+    render();
+    return;
+  }
+  if (state.profileTest.running) return;
+
+  const startedAt = new Date().toISOString();
+  state.profileTest = {
+    ...emptyProfileTestState(),
+    mode,
+    running: true,
+    phase: "warmup",
+    startedAt,
+    message: mode === "ramp"
+      ? "Calentamiento ERG. Despues el objetivo subira cada minuto hasta que pulses No puedo mas o la app detecte fatiga."
+      : "Calentamiento ERG. El esfuerzo de 20 minutos sera libre para medir tu potencia sostenible.",
+    targetPowerW: warmupTargetPower(),
+    ergAttempted: true
+  };
+  render();
+
+  const started = await withLoading("Preparando test FTP...", async () => {
+    await trainerClient.start();
+    await sendTargetPowerToTrainer(state.profileTest.targetPowerW, true);
+    state.profileTest.timer = setInterval(() => {
+      tickFtpTest().catch((error) => showMessage(error.message));
+    }, 1000);
+    return true;
+  });
+  if (!started) {
+    state.profileTest = {
+      ...emptyProfileTestState(),
+      mode,
+      message: "No se ha podido iniciar el test."
+    };
+    render();
+  }
+}
+
+async function tickFtpTest() {
+  const t = state.profileTest;
+  if (!t.running) return;
+  t.elapsed += 1;
+  t.phaseElapsed += 1;
+
+  if (t.mode === "ramp") {
+    await tickRampTest(t);
+  } else {
+    await tickTwentyMinuteTest(t);
+  }
+  if (!t.running) return;
+
+  t.samples.push(profileTestSample(t));
+  if (shouldAutoFinishRamp(t)) {
+    await finishFtpTest("auto");
+    return;
+  }
+  if (state.view === "profile") render();
+}
+
+async function tickRampTest(t) {
+  if (t.phase === "warmup" && t.phaseElapsed >= 300) {
+    t.phase = "test";
+    t.phaseElapsed = 0;
+    t.targetPowerW = rampStartPower();
+    t.message = "Ramp test en marcha. Mantente sentado y sigue el objetivo hasta que no puedas sostenerlo.";
+    await sendTargetPowerToTrainer(t.targetPowerW, true);
+    return;
+  }
+  if (t.phase !== "test") return;
+  const stepPower = rampStartPower() + Math.floor(t.phaseElapsed / 60) * rampStepPower();
+  if (stepPower !== t.targetPowerW) {
+    t.targetPowerW = stepPower;
+    await sendTargetPowerToTrainer(t.targetPowerW);
+  }
+}
+
+async function tickTwentyMinuteTest(t) {
+  if (t.phase === "warmup" && t.phaseElapsed >= 600) {
+    t.phase = "test";
+    t.phaseElapsed = 0;
+    t.targetPowerW = 0;
+    t.message = "Esfuerzo de 20 minutos: regula con desarrollo y cadencia para sacar tu mejor media sostenible.";
+    await trainerClient?.setGrade(0, { force: true });
+    return;
+  }
+  if (t.phase === "test" && t.phaseElapsed >= 1200) {
+    await finishFtpTest("complete");
+  }
+}
+
+function profileTestSample(t) {
+  return {
+    elapsed_seconds: t.elapsed,
+    phase: t.phase,
+    power_w: Math.max(0, Math.round(state.trainer.metrics.power_w || 0)),
+    cadence_rpm: Math.max(0, Math.round(state.trainer.metrics.cadence_rpm || 0)),
+    heart_rate_bpm: state.trainer.metrics.heart_rate_bpm ?? null,
+    target_power_w: t.targetPowerW || null
+  };
+}
+
+function shouldAutoFinishRamp(t) {
+  if (t.mode !== "ramp" || t.phase !== "test" || t.phaseElapsed < 75) return false;
+  const recent = t.samples.slice(-8);
+  if (recent.length < 8) return false;
+  const target = Math.max(1, t.targetPowerW || 0);
+  const lowPower = recent.every((sample) => sample.power_w < target * 0.85);
+  const lowCadence = recent.every((sample) => sample.cadence_rpm > 0 && sample.cadence_rpm < 50);
+  return lowPower || lowCadence;
+}
+
+async function finishFtpTest(reason) {
+  const t = state.profileTest;
+  if (!t.running) return;
+  clearInterval(t.timer);
+  t.running = false;
+  t.timer = null;
+
+  const result = calculateFtpTestResult(t, reason);
+  await neutralizeTrainer();
+  if (!result) {
+    t.message = "Test detenido sin suficientes datos para calcular FTP.";
+    render();
+    return;
+  }
+  t.phase = "done";
+  t.result = result;
+  t.message = "Resultado guardado en tu perfil.";
+  await saveFtpResult(result);
+  render();
+}
+
+async function cancelFtpTest() {
+  if (state.profileTest.timer) clearInterval(state.profileTest.timer);
+  await neutralizeTrainer();
+  state.profileTest = {
+    ...emptyProfileTestState(),
+    mode: state.profileTest.mode || "ramp",
+    message: "Test cancelado."
+  };
+  render();
+}
+
+function calculateFtpTestResult(test, reason) {
+  const testSamples = test.samples.filter((sample) => sample.phase === "test" && sample.power_w > 0);
+  if (test.mode === "ramp") {
+    const bestMinutePower = bestRollingAverage(testSamples, 60);
+    if (!bestMinutePower) return null;
+    return {
+      method: "ramp",
+      ftp_w: Math.round(bestMinutePower * 0.75),
+      source_power_w: Math.round(bestMinutePower),
+      duration_seconds: test.elapsed,
+      completed_at: new Date().toISOString(),
+      reason,
+      sample_count: test.samples.length
+    };
+  }
+  if (testSamples.length < 1140) return null;
+  const avgPower = average(testSamples.slice(0, 1200).map((sample) => sample.power_w));
+  return {
+    method: "twenty",
+    ftp_w: Math.round(avgPower * 0.95),
+    source_power_w: Math.round(avgPower),
+    duration_seconds: test.elapsed,
+    completed_at: new Date().toISOString(),
+    reason,
+    sample_count: test.samples.length
+  };
+}
+
+async function saveFtpResult(result) {
+  const history = [result, ...(state.settings.ftp_test_history || [])].slice(0, FTP_TEST_HISTORY_LIMIT);
+  await saveSettingsPayload({
+    ftp_w: result.ftp_w,
+    ftp_updated_at: result.completed_at,
+    ftp_method: result.method,
+    ftp_test_history: history
+  });
+}
+
+async function saveManualFtp() {
+  const input = document.querySelector("[name='manual_ftp_w']");
+  const ftp = Math.round(Number(input?.value || 0));
+  if (ftp <= 0) {
+    showMessage("Introduce un FTP mayor que cero.");
+    render();
+    return;
+  }
+  const result = {
+    method: "manual",
+    ftp_w: ftp,
+    source_power_w: ftp,
+    duration_seconds: 0,
+    completed_at: new Date().toISOString(),
+    reason: "manual",
+    sample_count: 0
+  };
+  await withLoading("Guardando FTP...", async () => {
+    await saveFtpResult(result);
+    state.profileTest.result = result;
+    showMessage("FTP guardado en el perfil.");
+  });
+}
+
+async function sendTargetPowerToTrainer(powerWatts, force = false) {
+  if (!trainerClient?.connected || !powerWatts || targetPowerCommandPending) return;
+  targetPowerCommandPending = true;
+  try {
+    await trainerClient.setTargetPower(powerWatts, { force });
+    state.profileTest.ergEnabled = true;
+  } catch (error) {
+    state.profileTest.ergEnabled = false;
+    state.profileTest.message = `ERG no aceptado por el rodillo; sigue el objetivo manualmente. ${error.message}`;
+    try {
+      await trainerClient.setGrade(0, { force: true });
+    } catch {
+      // Keep the test running even when the trainer also rejects simulation reset.
+    }
+  } finally {
+    targetPowerCommandPending = false;
+  }
+}
+
+async function saveSettingsPayload(overrides = {}) {
+  const s = state.settings;
+  const payload = {
+    openai_api_key: "",
+    clear_openai_api_key: false,
+    max_trainer_grade_percent: s.max_trainer_grade_percent,
+    enable_negative_grades: s.enable_negative_grades,
+    smooth_grade_changes: s.smooth_grade_changes,
+    rider_weight_kg: s.rider_weight_kg,
+    bike_weight_kg: s.bike_weight_kg,
+    ftp_w: s.ftp_w || 0,
+    ftp_updated_at: s.ftp_updated_at || "",
+    ftp_method: s.ftp_method || "",
+    ftp_test_history: s.ftp_test_history || [],
+    ...overrides
+  };
+  state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+}
+
 async function saveSettings() {
   const root = document.querySelector(".settings-panel");
   const settings = {
@@ -1377,7 +1857,7 @@ async function saveSettings() {
     bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
   };
   await withLoading("Guardando ajustes...", async () => {
-    state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(settings) });
+    await saveSettingsPayload(settings);
     showMessage("Ajustes guardados.");
   });
 }
@@ -1640,12 +2120,84 @@ function emptyCalibrationState() {
   };
 }
 
+function emptyProfileTestState() {
+  return {
+    mode: "ramp",
+    running: false,
+    timer: null,
+    phase: "ready",
+    elapsed: 0,
+    phaseElapsed: 0,
+    startedAt: null,
+    targetPowerW: 0,
+    ergAttempted: false,
+    ergEnabled: false,
+    samples: [],
+    result: null,
+    message: ""
+  };
+}
+
 function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
 function statPill(label, value) {
   return `<div class="stat-pill"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function currentFtp() {
+  return Math.max(0, Math.round(Number(state.settings?.ftp_w || 0)));
+}
+
+function warmupTargetPower() {
+  const ftp = currentFtp();
+  return roundToNearest(ftp ? Math.max(75, ftp * 0.5) : 100, 5);
+}
+
+function rampStartPower() {
+  const ftp = currentFtp();
+  return roundToNearest(ftp ? Math.max(60, ftp * 0.46) : 100, 5);
+}
+
+function rampStepPower() {
+  const ftp = currentFtp();
+  return roundToNearest(ftp ? Math.max(10, ftp * 0.06) : 20, 5);
+}
+
+function roundToNearest(value, step) {
+  return Math.round(value / step) * step;
+}
+
+function average(values) {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function bestRollingAverage(samples, windowSeconds) {
+  if (samples.length < windowSeconds) return 0;
+  let sum = 0;
+  let best = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    sum += samples[i].power_w;
+    if (i >= windowSeconds) sum -= samples[i - windowSeconds].power_w;
+    if (i >= windowSeconds - 1) best = Math.max(best, sum / windowSeconds);
+  }
+  return best;
+}
+
+function formatFtpMethod(method) {
+  if (method === "ramp") return "Ramp test";
+  if (method === "twenty") return "20 min";
+  if (method === "manual") return "Manual";
+  return method;
+}
+
+function formatTestPhase(phase) {
+  if (phase === "warmup") return "Calentamiento";
+  if (phase === "test") return "Test";
+  if (phase === "done") return "Completado";
+  return "Preparado";
 }
 
 function formatActivityGrade(activity) {

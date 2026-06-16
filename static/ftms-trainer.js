@@ -1,11 +1,13 @@
 const FTMS_SERVICE = 0x1826;
 const FITNESS_MACHINE_FEATURE = 0x2acc;
 const INDOOR_BIKE_DATA = 0x2ad2;
+const SUPPORTED_POWER_RANGE = 0x2ad8;
 const FITNESS_MACHINE_CONTROL_POINT = 0x2ad9;
 const FITNESS_MACHINE_STATUS = 0x2ada;
 
 const OPCODES = {
   requestControl: 0x00,
+  setTargetPower: 0x05,
   startOrResume: 0x07,
   stopOrPause: 0x08,
   setIndoorBikeSimulation: 0x11,
@@ -45,12 +47,20 @@ export class FtmsTrainer {
     this.device = null;
     this.server = null;
     this.feature = null;
+    this.supportedPowerRange = null;
     this.indoorBikeData = null;
     this.controlPoint = null;
     this.machineStatus = null;
-    this.features = { rawMachineFeatures: 0, rawTargetSettingFeatures: 0, spinDownControl: null };
+    this.features = {
+      rawMachineFeatures: 0,
+      rawTargetSettingFeatures: 0,
+      targetPower: null,
+      spinDownControl: null,
+      powerRange: null
+    };
     this.pendingResponses = new Map();
     this.lastGrade = null;
+    this.lastTargetPower = null;
   }
 
   get connected() {
@@ -77,11 +87,16 @@ export class FtmsTrainer {
     this.server = await this.device.gatt.connect();
     const service = await this.server.getPrimaryService(FTMS_SERVICE);
     this.feature = await getOptionalCharacteristic(service, FITNESS_MACHINE_FEATURE);
+    this.supportedPowerRange = await getOptionalCharacteristic(service, SUPPORTED_POWER_RANGE);
     this.indoorBikeData = await service.getCharacteristic(INDOOR_BIKE_DATA);
     this.controlPoint = await service.getCharacteristic(FITNESS_MACHINE_CONTROL_POINT);
     this.machineStatus = await getOptionalCharacteristic(service, FITNESS_MACHINE_STATUS);
 
     if (this.feature) this.features = parseFitnessMachineFeatures(await this.feature.readValue());
+    if (this.supportedPowerRange) {
+      this.features.powerRange = parseSupportedPowerRange(await this.supportedPowerRange.readValue());
+      if (this.features.targetPower === null) this.features.targetPower = true;
+    }
 
     this.controlPoint.addEventListener("characteristicvaluechanged", (event) => {
       this.handleControlPointResponse(event.target.value);
@@ -127,6 +142,7 @@ export class FtmsTrainer {
 
   async neutralize() {
     if (!this.connected) return;
+    this.lastTargetPower = null;
     await this.setGrade(0, { force: true });
     try {
       await this.pause();
@@ -148,6 +164,18 @@ export class FtmsTrainer {
     payload.setUint8(5, 40);
     payload.setUint8(6, 51);
     await this.writeControlPoint(payload, OPCODES.setIndoorBikeSimulation);
+  }
+
+  async setTargetPower(powerWatts, { force = false } = {}) {
+    if (!this.connected) return;
+    const targetPower = clampTargetPower(Math.round(powerWatts), this.features.powerRange);
+    if (!force && this.lastTargetPower !== null && Math.abs(targetPower - this.lastTargetPower) < 1) return;
+    this.lastTargetPower = targetPower;
+
+    const payload = new DataView(new ArrayBuffer(3));
+    payload.setUint8(0, OPCODES.setTargetPower);
+    payload.setInt16(1, targetPower, true);
+    await this.writeControlPoint(payload, OPCODES.setTargetPower);
   }
 
   async startSpinDownCalibration() {
@@ -218,13 +246,20 @@ export class FtmsTrainer {
     this.indoorBikeData = null;
     this.controlPoint = null;
     this.machineStatus = null;
-    this.features = { rawMachineFeatures: 0, rawTargetSettingFeatures: 0, spinDownControl: null };
+    this.features = {
+      rawMachineFeatures: 0,
+      rawTargetSettingFeatures: 0,
+      targetPower: null,
+      spinDownControl: null,
+      powerRange: null
+    };
     this.pendingResponses.forEach(({ timer, reject }) => {
       clearTimeout(timer);
       reject(new Error("El rodillo se ha desconectado."));
     });
     this.pendingResponses.clear();
     this.lastGrade = null;
+    this.lastTargetPower = null;
     this.emitStatus("Rodillo desconectado");
     this.onDisconnect?.();
   }
@@ -272,10 +307,13 @@ export function parseIndoorBikeData(value) {
 }
 
 export function parseFitnessMachineFeatures(value) {
+  const rawTargetSettingFeatures = readUint32(value, 4);
   return {
     rawMachineFeatures: readUint32(value, 0),
-    rawTargetSettingFeatures: readUint32(value, 4),
-    spinDownControl: value.byteLength >= 8 ? Boolean(readUint32(value, 4) & (1 << 15)) : null
+    rawTargetSettingFeatures,
+    targetPower: value.byteLength >= 8 ? Boolean(rawTargetSettingFeatures & (1 << 3)) : null,
+    spinDownControl: value.byteLength >= 8 ? Boolean(rawTargetSettingFeatures & (1 << 15)) : null,
+    powerRange: null
   };
 }
 
@@ -308,6 +346,22 @@ function parseSpinDownControlResponse(value) {
     lowSpeedKph: Math.min(...speeds),
     highSpeedKph: Math.max(...speeds)
   };
+}
+
+function parseSupportedPowerRange(value) {
+  if (!value || value.byteLength < 6) return null;
+  return {
+    minPowerW: readInt16(value, 0),
+    maxPowerW: readInt16(value, 2),
+    incrementW: Math.max(1, readUint16(value, 4))
+  };
+}
+
+function clampTargetPower(powerWatts, powerRange) {
+  if (!powerRange) return powerWatts;
+  const clamped = Math.min(powerRange.maxPowerW, Math.max(powerRange.minPowerW, powerWatts));
+  const increment = powerRange.incrementW || 1;
+  return Math.round(clamped / increment) * increment;
 }
 
 async function getOptionalCharacteristic(service, uuid) {

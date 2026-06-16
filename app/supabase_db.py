@@ -206,6 +206,10 @@ def get_settings(auth: AuthContext) -> AppSettings:
         smooth_grade_changes=row["smooth_grade_changes"],
         rider_weight_kg=row["rider_weight_kg"],
         bike_weight_kg=row["bike_weight_kg"],
+        ftp_w=row.get("ftp_w") or 0,
+        ftp_updated_at=row.get("ftp_updated_at") or "",
+        ftp_method=row.get("ftp_method") or "",
+        ftp_test_history=row.get("ftp_test_history") or [],
     )
 
 
@@ -241,6 +245,10 @@ def update_settings(auth: AuthContext, settings: AppSettingsUpdate) -> AppSettin
         "smooth_grade_changes": settings.smooth_grade_changes,
         "rider_weight_kg": settings.rider_weight_kg,
         "bike_weight_kg": settings.bike_weight_kg,
+        "ftp_w": settings.ftp_w,
+        "ftp_updated_at": settings.ftp_updated_at or None,
+        "ftp_method": settings.ftp_method,
+        "ftp_test_history": settings.ftp_test_history,
     }
     _request(
         auth,

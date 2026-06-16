@@ -725,7 +725,125 @@ input[type="range"] {
   gap: 18px;
 }
 
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.profile-main,
+.profile-side,
+.ftp-test-panel,
+.zones-panel,
+.manual-ftp-panel,
+.history-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.test-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.test-selector button.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+}
+
+.protocol-box {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.protocol-box strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 18px;
+}
+
+.protocol-box p,
+.history-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.ftp-actions {
+  gap: 10px;
+}
+
+.test-result {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.38);
+  border-radius: 8px;
+  background: var(--brand-soft);
+}
+
+.test-result strong {
+  color: var(--brand-strong);
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.test-result span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.zone-table {
+  display: grid;
+  gap: 8px;
+}
+
+.zone-row,
+.history-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.zone-row {
+  grid-template-columns: 52px minmax(110px, 1fr) minmax(76px, auto) minmax(96px, auto);
+}
+
+.history-row {
+  grid-template-columns: 76px minmax(72px, 1fr) auto;
+}
+
+.zone-row strong,
+.history-row strong {
+  color: var(--brand-strong);
+  font-size: 17px;
+}
+
+.zone-row span,
+.history-row span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.zone-row b {
+  text-align: right;
+}
+
 .training-side .metrics {
+  grid-template-columns: 1fr;
+}
+
+.metrics.compact {
   grid-template-columns: 1fr;
 }
 
@@ -1006,7 +1124,7 @@ input[type="range"] {
   }
 
   nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   nav button {
@@ -1019,6 +1137,10 @@ input[type="range"] {
   }
 
   .training-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1099,7 +1221,7 @@ input[type="range"] {
   }
 
   nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
   }
 
@@ -1198,6 +1320,15 @@ input[type="range"] {
   .route-ribbon,
   .status-chip {
     white-space: normal;
+  }
+
+  .zone-row,
+  .history-row {
+    grid-template-columns: 1fr;
+  }
+
+  .zone-row b {
+    text-align: left;
   }
 
   .trainer-settings-actions {

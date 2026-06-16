@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -108,6 +108,10 @@ class AppSettings(BaseModel):
     smooth_grade_changes: bool = True
     rider_weight_kg: float = 75
     bike_weight_kg: float = 9
+    ftp_w: int = Field(default=0, ge=0)
+    ftp_updated_at: str = ""
+    ftp_method: str = ""
+    ftp_test_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AppSettingsUpdate(BaseModel):
@@ -118,6 +122,10 @@ class AppSettingsUpdate(BaseModel):
     smooth_grade_changes: bool = True
     rider_weight_kg: float = 75
     bike_weight_kg: float = 9
+    ftp_w: int = Field(default=0, ge=0)
+    ftp_updated_at: str = ""
+    ftp_method: str = ""
+    ftp_test_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ImportResult(BaseModel):
