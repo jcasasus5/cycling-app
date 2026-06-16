@@ -565,7 +565,7 @@ function renderActivities() {
       <div class="activity-stats">
         ${statPill("Distancia", `${activity.distance_km.toFixed(2)} km`)}
         ${statPill("Potencia", `${activity.avg_power_w} W`)}
-        ${statPill("Cadencia", `${activity.avg_cadence_rpm} rpm`)}
+        ${statPill("Pendiente", formatActivityGrade(activity))}
         ${statPill("Velocidad", `${activity.avg_speed_kph.toFixed(1)} km/h`)}
       </div>
     </article>
@@ -1646,6 +1646,11 @@ function metric(label, value) {
 
 function statPill(label, value) {
   return `<div class="stat-pill"><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function formatActivityGrade(activity) {
+  if (!activity.distance_km) return "0.0%";
+  return `${(activity.completed_elevation_m / (activity.distance_km * 10)).toFixed(1)}%`;
 }
 
 function numberInput(label, name, value) {
