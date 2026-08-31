@@ -4,6 +4,7 @@ const app = document.querySelector("#app");
 const navButtons = document.querySelectorAll("[data-view]");
 const MESSAGE_DURATION_MS = 4600;
 const SESSION_STORAGE_KEY = "cycling-app-supabase-session";
+const STRAVA_OAUTH_STATE_KEY = "cycling-app-strava-oauth-state";
 const FTP_TEST_HISTORY_LIMIT = 12;
 const FTP_ZONE_DEFINITIONS = [
   ["Z1", "Recuperacion", 0, 0.55],
@@ -29,6 +30,7 @@ const state = {
   routes: [],
   activities: [],
   settings: null,
+  strava: null,
   selectedRoute: null,
   selectedActivity: null,
   draft: emptyDraft(),
@@ -68,6 +70,7 @@ async function initialize() {
     return;
   }
   if (!state.config.auth_enabled) {
+    await completeStravaOAuthFromUrl();
     await refresh();
     return;
   }
@@ -77,6 +80,7 @@ async function initialize() {
   }
   if (state.session) {
     try {
+      await completeStravaOAuthFromUrl();
       await refresh();
     } catch (error) {
       clearSession();
@@ -84,7 +88,7 @@ async function initialize() {
   }
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, responseType = "json") {
   const headers = options.body instanceof FormData ? {} : { "Content-Type": "application/json" };
   if (state.session?.access_token) headers.Authorization = `Bearer ${state.session.access_token}`;
   const response = await fetch(path, {
@@ -92,25 +96,57 @@ async function api(path, options = {}) {
     ...options
   });
   if (response.status === 401 && state.session?.refresh_token && await refreshSession()) {
-    return api(path, options);
+    return api(path, options, responseType);
   }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error inesperado." }));
     throw new Error(error.detail || "Error inesperado.");
   }
   if (response.status === 204) return null;
-  return response.json();
+  return responseType === "blob" ? response.blob() : response.json();
+}
+
+async function completeStravaOAuthFromUrl() {
+  const url = new URL(window.location.href);
+  const oauthState = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const oauthError = url.searchParams.get("error");
+  if (!oauthState || (!code && !oauthError)) return false;
+
+  state.view = "settings";
+  navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === "settings"));
+  try {
+    if (oauthError) throw new Error("Has cancelado la conexión con Strava.");
+    const expectedState = sessionStorage.getItem(STRAVA_OAUTH_STATE_KEY);
+    if (expectedState && expectedState !== oauthState) {
+      throw new Error("La respuesta de Strava no coincide con esta sesión.");
+    }
+    state.strava = await api("/api/integrations/strava/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state: oauthState })
+    });
+    showMessage("Cuenta de Strava conectada.");
+  } catch (error) {
+    showMessage(error.message || "No se ha podido conectar con Strava.");
+  } finally {
+    sessionStorage.removeItem(STRAVA_OAUTH_STATE_KEY);
+    ["code", "state", "scope", "error"].forEach((name) => url.searchParams.delete(name));
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  return true;
 }
 
 async function refresh() {
-  const [routes, activities, settings] = await Promise.all([
+  const [routes, activities, settings, stravaConnection] = await Promise.all([
     api("/api/routes"),
     api("/api/activities"),
-    api("/api/settings")
+    api("/api/settings"),
+    api("/api/integrations/strava")
   ]);
   state.routes = routes;
   state.activities = activities;
   state.settings = settings;
+  state.strava = stravaConnection;
 }
 
 function setView(view) {
@@ -260,6 +296,7 @@ async function submitAuth(event) {
     }
     saveSession(session);
     state.authMessage = "";
+    await completeStravaOAuthFromUrl();
     await refresh();
   }, showAuthError);
 }
@@ -573,7 +610,10 @@ function renderActivities() {
           <h3>${escapeHtml(activity.route_name)}</h3>
           <p>${formatSeconds(activity.active_seconds)} activo · ${formatSeconds(activity.total_seconds)} total</p>
         </div>
-        <span class="status-chip ${activity.status === "partial" ? "partial" : ""}">${activity.status === "completed" ? "Completada" : "Parcial"}</span>
+        <div class="activity-statuses">
+          <span class="status-chip ${activity.status === "partial" ? "partial" : ""}">${activity.status === "completed" ? "Completada" : "Parcial"}</span>
+          ${renderStravaActivityBadge(activity)}
+        </div>
       </div>
       <div class="activity-stats">
         ${statPill("Distancia", `${activity.distance_km.toFixed(2)} km`)}
@@ -585,7 +625,7 @@ function renderActivities() {
   `).join("");
   return `
     <section>
-      <header class="page-header"><div><span class="eyebrow">Historial</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados</p></div></header>
+      <header class="page-header"><div><span class="eyebrow">Historial</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados · Abre una actividad para descargar sus datos.</p></div></header>
       <div class="dashboard-strip">
         ${metric("Actividades", state.activities.length)}
         ${metric("Kilometros", `${totalKm.toFixed(1)} km`)}
@@ -621,6 +661,15 @@ function renderActivityModal() {
         ${metric("Tiempo total", formatSeconds(activity.total_seconds))}
         ${metric("Desnivel virtual", `${Math.round(activity.completed_elevation_m)} m`)}
       </div>
+      ${renderStravaActivityMessage(activity)}
+      <div class="integration-result activity-export">
+        <div>
+          <strong>Descarga de datos</strong>
+          <p>${detail.samples.length ? "Archivo TCX con tiempo, distancia, velocidad, cadencia, potencia y altitud virtual. No necesitas conectar Strava para descargarlo." : "Esta actividad no tiene datos registrados para exportar."}</p>
+          <a href="https://www.strava.com/upload/select" target="_blank" rel="noopener noreferrer">Importar archivo en Strava</a>
+        </div>
+        <button class="primary" data-action="download-activity-tcx" ${detail.samples.length ? "" : "disabled"}>Descargar TCX</button>
+      </div>
       </section>
     </div>
   `;
@@ -636,6 +685,7 @@ function renderSettings() {
         <button class="primary" data-action="save-settings">Guardar ajustes</button>
       </header>
       ${renderTrainerSettingsPanel()}
+      ${renderStravaSettingsPanel()}
       <div class="panel form-grid settings-panel">
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="" autocomplete="off" placeholder="${s.openai_api_key_configured ? "Clave guardada" : "sk-..."}" /><small>${keyStatus}</small></label>
         <label class="check wide"><input type="checkbox" name="clear_openai_api_key" /> Eliminar la clave de OpenAI guardada</label>
@@ -653,6 +703,67 @@ function renderSettings() {
       ` : ""}
     </section>
   `;
+}
+
+function renderStravaSettingsPanel() {
+  const connection = state.strava || { configured: false, connected: false };
+  if (!connection.configured) {
+    return `
+      <div class="panel integration-panel">
+        <div>
+          <span class="eyebrow">Strava</span>
+          <h3>Conexión automática no configurada</h3>
+          <p>Puedes descargar el TCX desde el detalle de cualquier actividad e importarlo manualmente en Strava. La conexión automática seguirá disponible cuando configures las credenciales de Strava en el servidor.</p>
+        </div>
+        <span class="status-chip partial">No disponible</span>
+      </div>
+    `;
+  }
+  if (connection.connected) {
+    return `
+      <div class="panel integration-panel">
+        <div>
+          <span class="eyebrow">Strava</span>
+          <h3>${escapeHtml(connection.athlete_name || "Cuenta conectada")}</h3>
+          <p>Las actividades completadas se subirán automáticamente como bici estática con los datos registrados por el rodillo.</p>
+        </div>
+        <div class="integration-actions">
+          <span class="status-chip">Conectado</span>
+          <button data-action="disconnect-strava">Desconectar</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="panel integration-panel">
+      <div>
+        <span class="eyebrow">Strava</span>
+        <h3>Publica tus actividades automáticamente</h3>
+        <p>Se enviarán distancia, velocidad, cadencia, potencia y altitud virtual cuando marques una actividad como completada.</p>
+      </div>
+      <button class="primary" data-action="connect-strava">Conectar con Strava</button>
+    </div>
+  `;
+}
+
+function renderStravaActivityBadge(activity) {
+  if (activity.strava_status === "ready") return `<span class="status-chip strava-ready">En Strava</span>`;
+  if (activity.strava_status === "pending") return `<span class="status-chip partial">Enviando a Strava</span>`;
+  if (activity.strava_status === "error") return `<span class="status-chip strava-error">Error Strava</span>`;
+  return "";
+}
+
+function renderStravaActivityMessage(activity) {
+  if (activity.strava_status === "ready" && activity.strava_activity_id) {
+    return `<div class="integration-result success"><strong>Publicada en Strava</strong><a href="https://www.strava.com/activities/${encodeURIComponent(activity.strava_activity_id)}" target="_blank" rel="noreferrer">Abrir actividad</a></div>`;
+  }
+  if (activity.strava_status === "pending") {
+    return `<div class="integration-result"><strong>Enviada a Strava</strong><span>Strava está terminando de procesarla.</span></div>`;
+  }
+  if (activity.strava_status === "error") {
+    return `<div class="integration-result error"><strong>No se ha podido publicar en Strava</strong><span>${escapeHtml(activity.strava_error || "Error desconocido.")}</span></div>`;
+  }
+  return "";
 }
 
 function renderProfile() {
@@ -1035,6 +1146,7 @@ function bindEvents() {
   document.querySelector("[data-action='save-partial']")?.addEventListener("click", () => saveActivity("partial"));
   document.querySelector("[data-action='save-completed']")?.addEventListener("click", () => saveActivity("completed"));
   document.querySelector("[data-action='resume-activity']")?.addEventListener("click", resumeActivity);
+  document.querySelector("[data-action='download-activity-tcx']")?.addEventListener("click", downloadActivityTcx);
   document.querySelector("[data-action='delete-current-activity']")?.addEventListener("click", async () => {
     if (state.selectedActivity) await deleteActivity(state.selectedActivity.activity.id);
   });
@@ -1051,6 +1163,8 @@ function bindEvents() {
   document.querySelector("[data-action='cancel-ftp-test']")?.addEventListener("click", cancelFtpTest);
   document.querySelector("[data-action='save-manual-ftp']")?.addEventListener("click", saveManualFtp);
   document.querySelector("[data-action='save-settings']")?.addEventListener("click", saveSettings);
+  document.querySelector("[data-action='connect-strava']")?.addEventListener("click", connectStrava);
+  document.querySelector("[data-action='disconnect-strava']")?.addEventListener("click", disconnectStrava);
   document.querySelector("[data-action='change-password']")?.addEventListener("click", changePassword);
 }
 
@@ -1585,6 +1699,27 @@ async function saveActivity(status) {
   }
 }
 
+async function downloadActivityTcx() {
+  const activityId = state.selectedActivity?.activity.id;
+  if (!activityId) return;
+  await withLoading("Preparando descarga TCX...", async () => {
+    const blob = await api(`/api/activities/${activityId}/export.tcx`, {}, "blob");
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `cycling-activity-${activityId}.tcx`;
+    link.hidden = true;
+    document.body.appendChild(link);
+    try {
+      link.click();
+      showMessage("Descarga iniciada. Puedes importar el archivo TCX en Strava.");
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    }
+  });
+}
+
 async function neutralizeTrainer() {
   if (!trainerClient?.connected) return;
   try {
@@ -1859,6 +1994,22 @@ async function saveSettings() {
   await withLoading("Guardando ajustes...", async () => {
     await saveSettingsPayload(settings);
     showMessage("Ajustes guardados.");
+  });
+}
+
+async function connectStrava() {
+  await withLoading("Preparando la conexión con Strava...", async () => {
+    const authorization = await api("/api/integrations/strava/authorize", { method: "POST" });
+    sessionStorage.setItem(STRAVA_OAUTH_STATE_KEY, authorization.state);
+    window.location.assign(authorization.authorization_url);
+  });
+}
+
+async function disconnectStrava() {
+  await withLoading("Desconectando Strava...", async () => {
+    await api("/api/integrations/strava", { method: "DELETE" });
+    state.strava = await api("/api/integrations/strava");
+    showMessage("Cuenta de Strava desconectada.");
   });
 }
 

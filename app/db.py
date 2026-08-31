@@ -95,8 +95,23 @@ def init_db() -> None:
               path TEXT NOT NULL,
               created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS strava_connections (
+              user_id TEXT PRIMARY KEY,
+              athlete_id TEXT NOT NULL,
+              athlete_name TEXT NOT NULL,
+              access_token_encrypted TEXT NOT NULL,
+              refresh_token_encrypted TEXT NOT NULL,
+              expires_at INTEGER NOT NULL,
+              connected_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             """
         )
+        _ensure_sqlite_column(conn, "activities", "strava_upload_id", "TEXT NOT NULL DEFAULT ''")
+        _ensure_sqlite_column(conn, "activities", "strava_activity_id", "TEXT NOT NULL DEFAULT ''")
+        _ensure_sqlite_column(conn, "activities", "strava_status", "TEXT NOT NULL DEFAULT ''")
+        _ensure_sqlite_column(conn, "activities", "strava_error", "TEXT NOT NULL DEFAULT ''")
 
 
 @contextmanager
@@ -113,6 +128,12 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_sqlite_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def row_to_route(row: sqlite3.Row) -> Route:
@@ -158,6 +179,10 @@ def row_to_activity(row: sqlite3.Row) -> Activity:
         avg_cadence_rpm=row["avg_cadence_rpm"],
         avg_speed_kph=row["avg_speed_kph"],
         completed_elevation_m=row["completed_elevation_m"],
+        strava_upload_id=row["strava_upload_id"],
+        strava_activity_id=row["strava_activity_id"],
+        strava_status=row["strava_status"],
+        strava_error=row["strava_error"],
     )
 
 
@@ -399,6 +424,67 @@ def get_activity(activity_id: int) -> ActivityDetail | None:
 def delete_activity(activity_id: int) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+
+
+def update_activity_strava_status(
+    activity_id: int,
+    *,
+    upload_id: str = "",
+    strava_activity_id: str = "",
+    status: str,
+    error: str = "",
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE activities SET
+              strava_upload_id = ?, strava_activity_id = ?, strava_status = ?, strava_error = ?
+            WHERE id = ?
+            """,
+            (upload_id, strava_activity_id, status, error, activity_id),
+        )
+
+
+def get_strava_connection(user_id: str) -> dict[str, object] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM strava_connections WHERE user_id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def save_strava_connection(user_id: str, connection: dict[str, object]) -> None:
+    connected_at = str(connection.get("connected_at") or now_iso())
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO strava_connections (
+              user_id, athlete_id, athlete_name, access_token_encrypted,
+              refresh_token_encrypted, expires_at, connected_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+              athlete_id = excluded.athlete_id,
+              athlete_name = excluded.athlete_name,
+              access_token_encrypted = excluded.access_token_encrypted,
+              refresh_token_encrypted = excluded.refresh_token_encrypted,
+              expires_at = excluded.expires_at,
+              connected_at = excluded.connected_at,
+              updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                connection["athlete_id"],
+                connection["athlete_name"],
+                connection["access_token_encrypted"],
+                connection["refresh_token_encrypted"],
+                connection["expires_at"],
+                connected_at,
+                now_iso(),
+            ),
+        )
+
+
+def delete_strava_connection(user_id: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM strava_connections WHERE user_id = ?", (user_id,))
 
 
 def create_activity(draft: ActivityCreate) -> Activity:

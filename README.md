@@ -55,6 +55,7 @@ En el Tacx FLUX 2 Smart es normal ver una secuencia parecida a la de la app ofic
 - Autopausa cuando no hay velocidad real del rodillo.
 - Guardado de actividades parciales o completadas.
 - Historial de actividades con distancia, desnivel, potencia, cadencia y velocidad.
+- Conexion OAuth por usuario con Strava y subida automatica de actividades completadas como `VirtualRide`.
 - Ajustes de pendiente maxima, pendientes negativas, suavizado, peso del ciclista y peso de la bici.
 
 ## Requisitos
@@ -114,6 +115,33 @@ Cada usuario configura su propia clave de OpenAI desde `Ajustes`. En produccion 
 
 La clave solo se usa para analizar imagenes de perfiles de altimetria. El control del rodillo no usa OpenAI.
 
+## Strava
+
+### Descarga de datos sin conectar Strava
+
+En `Actividades`, abre un entrenamiento y pulsa `Descargar TCX`. El archivo contiene las muestras registradas de tiempo, distancia, velocidad, cadencia, potencia y altitud virtual. Puedes descargar actividades completadas o parciales; las actividades sin muestras no se pueden exportar.
+
+La descarga no requiere credenciales ni conexion con Strava y no publica nada automaticamente. Para subir el archivo manualmente, utiliza el enlace `Importar archivo en Strava` del detalle de actividad o [el cargador de archivos de Strava](https://www.strava.com/upload/select).
+
+Tampoco requiere la migracion opcional de Strava en Supabase: mientras la integracion no este configurada, la app no consulta sus tablas ni columnas.
+
+El endpoint `GET /api/activities/{id}/export.tcx` utiliza la misma autenticacion y permisos que la consulta de actividades. El archivo se genera al descargarlo, sin guardar copias en el servidor ni modificar la actividad. La integracion OAuth descrita a continuacion se conserva para activarla mas adelante.
+
+### Conexion automatica opcional
+
+Cada usuario puede conectar su propia cuenta desde `Ajustes`. Cuando termina una actividad, la app genera un archivo TCX con tiempo, distancia, velocidad, cadencia, potencia y altitud virtual, y lo envia a Strava como actividad de bici estatica (`VirtualRide`). Las actividades parciales no se publican.
+
+Para activarla con Supabase, aplica primero `supabase/migrations/202608290001_strava_integration.sql`. Despues registra una aplicacion en el panel de desarrolladores de Strava y configura estas variables en el servidor:
+
+```text
+STRAVA_CLIENT_ID
+STRAVA_CLIENT_SECRET
+STRAVA_REDIRECT_URI
+APP_ENCRYPTION_KEY
+```
+
+`STRAVA_REDIRECT_URI` debe ser la URL raiz exacta a la que vuelve el navegador, por ejemplo `http://127.0.0.1:8001/` en local o `https://tu-dominio.example/` en produccion. El dominio debe coincidir con el callback registrado en Strava. Los tokens de acceso y renovacion se cifran antes de guardarse y nunca se devuelven al navegador.
+
 ## Despliegue Y Seguridad
 
 El despliegue de produccion usa:
@@ -133,6 +161,8 @@ SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 APP_ENCRYPTION_KEY
 ```
+
+Las variables `STRAVA_*` son opcionales y solo deben configurarse al activar la conexion automatica, despues de aplicar su migracion.
 
 La publishable key de Supabase puede aparecer en el navegador; la seguridad de los datos depende de la autenticacion y las politicas RLS. No se debe usar una `service_role` key en el frontend.
 

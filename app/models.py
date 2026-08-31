@@ -93,11 +93,33 @@ class Activity(BaseModel):
     avg_cadence_rpm: int
     avg_speed_kph: float
     completed_elevation_m: float
+    strava_upload_id: str = ""
+    strava_activity_id: str = ""
+    strava_status: str = ""
+    strava_error: str = ""
 
 
 class ActivityDetail(BaseModel):
     activity: Activity
     samples: list[ActivitySample]
+
+
+class StravaConnection(BaseModel):
+    configured: bool
+    connected: bool
+    athlete_id: str = ""
+    athlete_name: str = ""
+    connected_at: str = ""
+
+
+class StravaAuthorization(BaseModel):
+    authorization_url: str
+    state: str
+
+
+class StravaOAuthCallback(BaseModel):
+    code: str = Field(min_length=1)
+    state: str = Field(min_length=1)
 
 
 class AppSettings(BaseModel):

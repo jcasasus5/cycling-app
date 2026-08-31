@@ -549,6 +549,24 @@ section {
   color: #9a4d0f;
 }
 
+.status-chip.strava-ready {
+  background: #eef8e9;
+  color: #39751d;
+}
+
+.status-chip.strava-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.activity-statuses,
+.integration-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-direction: column;
+}
+
 .route-stats,
 .activity-stats {
   display: grid;
@@ -885,6 +903,67 @@ input[type="range"] {
 
 .trainer-settings-panel {
   gap: 16px;
+}
+
+.integration-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.integration-panel h3 {
+  margin: 4px 0 7px;
+  font-size: 22px;
+}
+
+.integration-panel p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.integration-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.integration-result.success {
+  border-color: #b9dba8;
+  background: #f5fbf2;
+}
+
+.integration-result.error {
+  align-items: flex-start;
+  border-color: #f3b7b1;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.integration-result a {
+  color: var(--brand-strong);
+  font-weight: 800;
+}
+
+.activity-export {
+  margin-top: 16px;
+}
+
+.activity-export p {
+  margin: 6px 0 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.activity-export button {
+  flex-shrink: 0;
 }
 
 .trainer-settings-panel h3 {
@@ -1312,9 +1391,16 @@ input[type="range"] {
   .card-top,
   .form-section-title,
   .segments-header,
-  .progress-header {
+  .progress-header,
+  .integration-panel,
+  .integration-result {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .integration-actions,
+  .activity-statuses {
+    align-items: flex-start;
   }
 
   .route-ribbon,

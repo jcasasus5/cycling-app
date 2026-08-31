@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from app import strava
 from app.auth import AuthContext
 from app.models import (
     Activity,
@@ -19,6 +20,20 @@ from app.models import (
     RouteWithSegments,
 )
 from app.secrets import decrypt_secret, encrypt_secret
+
+
+ACTIVITY_SELECT = (
+    "id,route_id,started_at,ended_at,status,active_seconds,total_seconds,distance_km,"
+    "avg_power_w,max_power_w,avg_cadence_rpm,avg_speed_kph,completed_elevation_m"
+)
+
+
+def _activity_select() -> str:
+    # TCX downloads and ordinary rides do not require the optional Strava migration.
+    columns = ACTIVITY_SELECT
+    if strava.configured():
+        columns += ",strava_upload_id,strava_activity_id,strava_status,strava_error"
+    return columns + ",routes!inner(name)"
 
 
 def _headers(auth: AuthContext, *, prefer: str | None = None) -> dict[str, str]:
@@ -137,7 +152,7 @@ def list_activities(auth: AuthContext) -> list[Activity]:
         "GET",
         "activities",
         params={
-            "select": "id,route_id,started_at,ended_at,status,active_seconds,total_seconds,distance_km,avg_power_w,max_power_w,avg_cadence_rpm,avg_speed_kph,completed_elevation_m,routes!inner(name)",
+            "select": _activity_select(),
             "order": "started_at.desc",
         },
     )
@@ -155,19 +170,31 @@ def get_activity(auth: AuthContext, activity_id: int) -> ActivityDetail | None:
         "activities",
         params={
             "id": f"eq.{activity_id}",
-            "select": "id,route_id,started_at,ended_at,status,active_seconds,total_seconds,distance_km,avg_power_w,max_power_w,avg_cadence_rpm,avg_speed_kph,completed_elevation_m,routes!inner(name)",
+            "select": _activity_select(),
         },
     )
     if not rows:
         return None
     row = rows[0]
     activity = _activity({**row, "route_name": row["routes"]["name"]})
-    sample_rows = _request(
-        auth,
-        "GET",
-        "activity_samples",
-        params={"activity_id": f"eq.{activity_id}", "select": "*", "order": "elapsed_seconds.asc"},
-    )
+    sample_rows = []
+    while True:
+        page = _request(
+            auth,
+            "GET",
+            "activity_samples",
+            params={
+                "activity_id": f"eq.{activity_id}",
+                "select": "*",
+                "order": "elapsed_seconds.asc,id.asc",
+                "limit": "1000",
+                "offset": str(len(sample_rows)),
+            },
+        )
+        # Keep going until empty: the project's row cap may be lower than our limit.
+        if not page:
+            break
+        sample_rows.extend(page)
     return ActivityDetail(activity=activity, samples=[ActivitySample(**sample) for sample in sample_rows])
 
 
@@ -191,6 +218,49 @@ def update_activity(auth: AuthContext, activity_id: int, draft: ActivityCreate) 
 
 def delete_activity(auth: AuthContext, activity_id: int) -> None:
     _request(auth, "DELETE", "activities", params={"id": f"eq.{activity_id}"})
+
+
+def update_activity_strava_status(
+    auth: AuthContext,
+    activity_id: int,
+    *,
+    upload_id: str = "",
+    strava_activity_id: str = "",
+    status: str,
+    error: str = "",
+) -> None:
+    _request(
+        auth,
+        "PATCH",
+        "activities",
+        params={"id": f"eq.{activity_id}"},
+        json={
+            "strava_upload_id": upload_id,
+            "strava_activity_id": strava_activity_id,
+            "strava_status": status,
+            "strava_error": error,
+        },
+        prefer="return=minimal",
+    )
+
+
+def get_strava_connection(auth: AuthContext) -> dict[str, object] | None:
+    rows = _request(auth, "GET", "strava_connections", params={"select": "*"})
+    return rows[0] if rows else None
+
+
+def save_strava_connection(auth: AuthContext, connection: dict[str, object]) -> None:
+    _request(
+        auth,
+        "POST",
+        "strava_connections",
+        json={"user_id": auth.user_id, **connection},
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
+
+
+def delete_strava_connection(auth: AuthContext) -> None:
+    _request(auth, "DELETE", "strava_connections", params={"user_id": f"eq.{auth.user_id}"})
 
 
 def get_settings(auth: AuthContext) -> AppSettings:
