@@ -1,0 +1,12 @@
+# Local CLI identity; the production reference is supplied by GitHub Secrets.
+project_id = "cycling-app"
+
+[db]
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
