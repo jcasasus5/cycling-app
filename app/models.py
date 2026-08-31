@@ -23,6 +23,7 @@ class RouteSegment(RouteSegmentBase):
 
 class RouteBase(BaseModel):
     name: str = Field(min_length=1)
+    is_public: bool = False
     distance_km: float = Field(gt=0)
     elevation_gain_m: float = Field(ge=0)
     start_altitude_m: float
@@ -39,6 +40,7 @@ class RouteCreate(RouteBase):
 class Route(RouteBase):
     id: int
     created_at: str
+    is_owner: bool = True
 
 
 class RouteWithSegments(Route):
@@ -80,7 +82,7 @@ class ActivityCreate(BaseModel):
 
 class Activity(BaseModel):
     id: int
-    route_id: int
+    route_id: int | None
     route_name: str
     started_at: str
     ended_at: str

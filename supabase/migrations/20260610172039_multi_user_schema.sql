@@ -76,7 +76,6 @@ create index route_segments_route_idx on public.route_segments (route_id, start_
 create index activities_user_started_idx on public.activities (user_id, started_at desc);
 create index activities_route_idx on public.activities (route_id);
 create index activity_samples_activity_idx on public.activity_samples (activity_id, elapsed_seconds);
-create index imported_images_user_idx on public.imported_images (user_id);
 
 alter table public.routes enable row level security;
 alter table public.route_segments enable row level security;

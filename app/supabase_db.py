@@ -23,8 +23,12 @@ from app.secrets import decrypt_secret, encrypt_secret
 
 
 ACTIVITY_SELECT = (
-    "id,route_id,started_at,ended_at,status,active_seconds,total_seconds,distance_km,"
+    "id,route_id,route_name,started_at,ended_at,status,active_seconds,total_seconds,distance_km,"
     "avg_power_w,max_power_w,avg_cadence_rpm,avg_speed_kph,completed_elevation_m"
+)
+ROUTE_SELECT = (
+    "id,user_id,is_public,name,distance_km,elevation_gain_m,start_altitude_m,"
+    "end_altitude_m,avg_grade_percent,max_grade_percent,created_at,original_image_path"
 )
 
 
@@ -33,7 +37,7 @@ def _activity_select() -> str:
     columns = ACTIVITY_SELECT
     if strava.configured():
         columns += ",strava_upload_id,strava_activity_id,strava_status,strava_error"
-    return columns + ",routes!inner(name)"
+    return columns + ",routes(name)"
 
 
 def _headers(auth: AuthContext, *, prefer: str | None = None) -> dict[str, str]:
@@ -72,8 +76,8 @@ def _request(
     return response.json()
 
 
-def _route(row: dict[str, Any]) -> Route:
-    return Route(**row)
+def _route(row: dict[str, Any], auth: AuthContext) -> Route:
+    return Route(**row, is_owner=row["user_id"] == auth.user_id)
 
 
 def _segment(row: dict[str, Any]) -> RouteSegment:
@@ -81,20 +85,31 @@ def _segment(row: dict[str, Any]) -> RouteSegment:
 
 
 def _activity(row: dict[str, Any]) -> Activity:
-    return Activity(**row)
+    route_name = row.get("route_name") or (row.get("routes") or {}).get("name") or "Ruta eliminada"
+    return Activity(**{**row, "route_name": route_name})
+
+
+def _all_rows(auth: AuthContext, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
+    rows = []
+    while True:
+        page = _request(auth, "GET", path, params={**params, "limit": "1000", "offset": str(len(rows))})
+        # Supabase may cap pages below the requested limit. Only an empty page ends the list.
+        if not page:
+            return rows
+        rows.extend(page)
 
 
 def list_routes(auth: AuthContext) -> list[Route]:
-    rows = _request(
+    rows = _all_rows(
         auth,
-        "GET",
         "routes",
         params={
-            "select": "id,name,distance_km,elevation_gain_m,start_altitude_m,end_altitude_m,avg_grade_percent,max_grade_percent,created_at,original_image_path",
-            "order": "created_at.desc",
+            "select": ROUTE_SELECT,
+            "or": f"(user_id.eq.{auth.user_id},is_public.eq.true)",
+            "order": "created_at.desc,id.desc",
         },
     )
-    return [_route(row) for row in rows]
+    return sorted((_route(row, auth) for row in rows), key=lambda route: not route.is_owner)
 
 
 def get_route(auth: AuthContext, route_id: int) -> RouteWithSegments | None:
@@ -104,18 +119,17 @@ def get_route(auth: AuthContext, route_id: int) -> RouteWithSegments | None:
         "routes",
         params={
             "id": f"eq.{route_id}",
-            "select": "id,name,distance_km,elevation_gain_m,start_altitude_m,end_altitude_m,avg_grade_percent,max_grade_percent,created_at,original_image_path",
+            "select": ROUTE_SELECT,
         },
     )
     if not rows:
         return None
-    segment_rows = _request(
+    segment_rows = _all_rows(
         auth,
-        "GET",
         "route_segments",
-        params={"route_id": f"eq.{route_id}", "select": "*", "order": "start_km.asc"},
+        params={"route_id": f"eq.{route_id}", "select": "*", "order": "start_km.asc,id.asc"},
     )
-    return RouteWithSegments(**rows[0], segments=[_segment(row) for row in segment_rows])
+    return RouteWithSegments(**_route(rows[0], auth).model_dump(), segments=[_segment(row) for row in segment_rows])
 
 
 def create_route(auth: AuthContext, draft: RouteCreate) -> RouteWithSegments:
@@ -136,7 +150,7 @@ def update_route(auth: AuthContext, route_id: int, draft: RouteCreate) -> RouteW
 
 
 def delete_route(auth: AuthContext, route_id: int) -> None:
-    _request(auth, "DELETE", "routes", params={"id": f"eq.{route_id}"})
+    _request(auth, "DELETE", "routes", params={"id": f"eq.{route_id}", "user_id": f"eq.{auth.user_id}"})
 
 
 def duplicate_route(auth: AuthContext, route_id: int) -> RouteWithSegments | None:
@@ -156,11 +170,7 @@ def list_activities(auth: AuthContext) -> list[Activity]:
             "order": "started_at.desc",
         },
     )
-    activities = []
-    for row in rows:
-        route_name = row["routes"]["name"]
-        activities.append(_activity({**row, "route_name": route_name}))
-    return activities
+    return [_activity(row) for row in rows]
 
 
 def get_activity(auth: AuthContext, activity_id: int) -> ActivityDetail | None:
@@ -176,7 +186,7 @@ def get_activity(auth: AuthContext, activity_id: int) -> ActivityDetail | None:
     if not rows:
         return None
     row = rows[0]
-    activity = _activity({**row, "route_name": row["routes"]["name"]})
+    activity = _activity(row)
     sample_rows = []
     while True:
         page = _request(

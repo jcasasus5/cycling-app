@@ -17,3 +17,5 @@ data/imported-images
 *.db-wal
 .DS_Store
 .vercel
+supabase/.temp/
+deployment-url.txt

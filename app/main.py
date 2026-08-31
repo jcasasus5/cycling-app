@@ -66,6 +66,9 @@ def update_route(
     draft: RouteCreate,
     auth: AuthContext = Depends(require_user),
 ) -> RouteWithSegments:
+    existing = get_route(route_id, auth)
+    if not existing.is_owner:
+        raise HTTPException(status_code=403, detail="Solo el creador puede editar esta ruta. Duplícala para tener tu propia copia.")
     route = supabase_db.update_route(auth, route_id, draft) if auth_enabled() else db.update_route(route_id, draft)
     if route is None:
         raise HTTPException(status_code=404, detail="Ruta no encontrada.")
@@ -82,6 +85,9 @@ def duplicate_route(route_id: int, auth: AuthContext = Depends(require_user)) ->
 
 @app.delete("/api/routes/{route_id}", status_code=204)
 def delete_route(route_id: int, auth: AuthContext = Depends(require_user)) -> None:
+    existing = get_route(route_id, auth)
+    if not existing.is_owner:
+        raise HTTPException(status_code=403, detail="Solo el creador puede eliminar esta ruta.")
     if auth_enabled():
         supabase_db.delete_route(auth, route_id)
     else:

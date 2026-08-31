@@ -56,7 +56,7 @@ const state = {
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    setView(button.dataset.view);
+    navigateToView(button.dataset.view);
   });
 });
 
@@ -100,7 +100,9 @@ async function api(path, options = {}, responseType = "json") {
   }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error inesperado." }));
-    throw new Error(error.detail || "Error inesperado.");
+    const apiError = new Error(error.detail || "Error inesperado.");
+    apiError.status = response.status;
+    throw apiError;
   }
   if (response.status === 204) return null;
   return responseType === "blob" ? response.blob() : response.json();
@@ -164,6 +166,17 @@ function setView(view) {
   render();
 }
 
+async function navigateToView(view) {
+  if (view !== "routes") {
+    setView(view);
+    return;
+  }
+  await withLoading("Actualizando rutas...", async () => {
+    state.routes = await api("/api/routes");
+    setView(view);
+  });
+}
+
 function render() {
   app.setAttribute("aria-busy", state.busyText ? "true" : "false");
   if (state.config?.config_error) {
@@ -221,7 +234,7 @@ function renderAuth() {
       <div>
         <span class="eyebrow">Tacx Flux Climber</span>
         <h2>${recovering ? "Recuperar contraseña" : signingUp ? "Crear cuenta" : "Iniciar sesión"}</h2>
-        <p>${recovering ? "Te enviaremos un enlace para elegir una nueva contraseña." : signingUp ? "Tus rutas, actividades, ajustes y clave de OpenAI serán privados." : "Accede a tus rutas y entrenamientos."}</p>
+        <p>${recovering ? "Te enviaremos un enlace para elegir una nueva contraseña." : signingUp ? "Tus actividades, ajustes y clave de OpenAI serán privados. Tú decides qué rutas compartir." : "Accede a tus rutas y entrenamientos."}</p>
       </div>
       <form data-auth-form>
         <label>Correo electrónico<input type="email" name="email" autocomplete="email" required /></label>
@@ -425,11 +438,34 @@ function renderToast() {
 }
 
 function renderRoutes() {
-  const cards = state.routes.map((route) => `
+  const ownRoutes = state.routes.filter((route) => route.is_owner);
+  const publicRoutes = state.routes.filter((route) => !route.is_owner && route.is_public);
+  return `
+    <section>
+      <header class="page-header">
+        <div><span class="eyebrow">Biblioteca</span><h2>Rutas</h2><p>Crea tus recorridos y descubre los de la comunidad.</p></div>
+        <button class="primary" data-view-action="import">Crear ruta</button>
+      </header>
+      <section class="route-section" aria-labelledby="own-routes-title">
+        <header><h3 id="own-routes-title">Tus rutas <span class="route-count">${ownRoutes.length}</span></h3><p>Solo tú puedes editarlas o eliminarlas. Elige cuáles hacer públicas.</p></header>
+        <div class="grid-list">${ownRoutes.map(renderRouteCard).join("")}</div>
+        ${ownRoutes.length ? "" : `<div class="empty-state"><strong>Aún no tienes rutas propias</strong><p>Crea una ruta o duplica una de la comunidad.</p><button class="primary" data-view-action="import">Crear ruta</button></div>`}
+      </section>
+      <section class="route-section" aria-labelledby="public-routes-title">
+        <header><h3 id="public-routes-title">Rutas públicas <span class="route-count">${publicRoutes.length}</span></h3><p>Rutas compartidas por otros usuarios. Entrena con ellas o duplícalas para editarlas.</p></header>
+        <div class="grid-list">${publicRoutes.map(renderRouteCard).join("")}</div>
+        ${publicRoutes.length ? "" : `<div class="empty-state"><strong>Aún no hay rutas públicas de otros usuarios</strong></div>`}
+      </section>
+    </section>
+  `;
+}
+
+function renderRouteCard(route) {
+  return `
     <article class="card route-card" data-open-route="${route.id}" role="button" tabindex="0">
       <div class="card-top">
         <div>
-          <span class="eyebrow">Ruta</span>
+          <span class="eyebrow">${route.is_public ? "Pública" : "Privada"}${route.is_owner ? " · Tu ruta" : " · Comunidad"}</span>
           <h3>${escapeHtml(route.name)}</h3>
           <p>${new Date(route.created_at).toLocaleDateString("es-ES")}</p>
         </div>
@@ -442,16 +478,6 @@ function renderRoutes() {
         ${statPill("Final", `${Math.round(route.end_altitude_m)} m`)}
       </div>
     </article>
-  `).join("");
-  return `
-    <section>
-      <header class="page-header">
-        <div><span class="eyebrow">Biblioteca</span><h2>Rutas</h2><p>${state.routes.length} rutas guardadas</p></div>
-        <button class="primary" data-view-action="import">Crear ruta</button>
-      </header>
-      <div class="grid-list">${cards}</div>
-      ${state.routes.length ? "" : `<div class="empty-state"><strong>No hay rutas guardadas</strong><button class="primary" data-view-action="import">Crear ruta</button></div>`}
-    </section>
   `;
 }
 
@@ -493,13 +519,13 @@ function renderRouteModal() {
           </div>
           <div class="actions">
             <button data-action="duplicate-route">Duplicar</button>
-            <button data-action="delete-route">Eliminar</button>
-            <button class="${state.routeDirty ? "" : "hidden"}" data-action="update-route">Guardar cambios</button>
+            ${route.is_owner ? `<button data-action="delete-route">Eliminar</button>
+            <button class="${state.routeDirty ? "" : "hidden"}" data-action="update-route">Guardar cambios</button>` : ""}
             <button class="primary" data-action="start-training">Entrenar</button>
             <button data-action="close-route-modal">Cerrar</button>
           </div>
         </header>
-        ${renderRouteForm(state.draft)}
+        ${renderRouteForm(state.draft, !route.is_owner)}
         <div class="chart-shell"><canvas class="chart" data-chart="selected"></canvas></div>
       </section>
     </div>
@@ -527,12 +553,12 @@ function renderRouteDetail() {
         <div><span class="eyebrow">Detalle de ruta</span><h2>${escapeHtml(route.name)}</h2><p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+</p></div>
         <div class="actions">
           <button data-action="duplicate-route">Duplicar</button>
-          <button data-action="delete-route">Eliminar</button>
-          <button data-action="update-route">Guardar cambios</button>
+          ${route.is_owner ? `<button data-action="delete-route">Eliminar</button>
+          <button data-action="update-route">Guardar cambios</button>` : ""}
           <button class="primary" data-action="start-training">Entrenar</button>
         </div>
       </header>
-      ${renderRouteForm(routeToDraft(route))}
+      ${renderRouteForm(state.draft, !route.is_owner)}
       <div class="chart-shell"><canvas class="chart" data-chart="selected"></canvas></div>
     </section>
   `;
@@ -647,12 +673,12 @@ function renderActivityModal() {
       <header class="page-header">
         <div><span class="eyebrow">Detalle de actividad</span><h2>${escapeHtml(activity.route_name)}</h2><p>${activity.status === "completed" ? "Completada" : "Parcial"} · ${activity.distance_km.toFixed(2)} km · ${formatSeconds(activity.active_seconds)}</p></div>
         <div class="actions">
-          ${activity.status === "partial" ? `<button class="primary" data-action="resume-activity">Continuar</button>` : ""}
+          ${activity.status === "partial" && state.selectedRoute ? `<button class="primary" data-action="resume-activity">Continuar</button>` : ""}
           <button class="danger" data-action="delete-current-activity">Eliminar</button>
           <button data-action="close-activity-modal">Cerrar</button>
         </div>
       </header>
-      <div class="chart-shell"><canvas class="chart" data-chart="activity"></canvas></div>
+      ${state.selectedRoute ? `<div class="chart-shell"><canvas class="chart" data-chart="activity"></canvas></div>` : `<p class="notice">La ruta original ya no está disponible. Tu actividad y todos sus datos se conservan y puedes descargarlos.</p>`}
       <div class="metrics">
         ${metric("Potencia media", `${activity.avg_power_w} W`)}
         ${metric("Potencia máxima", `${activity.max_power_w} W`)}
@@ -1028,7 +1054,7 @@ function calibrationStep(number, title, description, active) {
   `;
 }
 
-function renderRouteForm(draft) {
+function renderRouteForm(draft, readOnly = false) {
   const calculated = calculateRouteFromSegments(draft);
   const rows = draft.segments.map((segment, index) => `
     <div class="segment-row" data-segment="${index}">
@@ -1037,13 +1063,16 @@ function renderRouteForm(draft) {
       ${numberInput("Altitud inicial (m)", "start_altitude_m", segment.start_altitude_m)}
       ${numberInput("Altitud final (m)", "end_altitude_m", segment.end_altitude_m)}
       <div class="readonly-field"><span>Pendiente</span><strong data-segment-grade="${index}">${calculateSegmentGrade(segment).toFixed(1)}%</strong></div>
-      <button class="danger small" data-delete-segment="${index}" type="button">Eliminar</button>
+      ${readOnly ? "" : `<button class="danger small" data-delete-segment="${index}" type="button">Eliminar</button>`}
     </div>
   `).join("");
   return `
-    <div class="panel route-editor" id="route-form">
+    ${readOnly ? `<p class="notice">Ruta pública de otro usuario. Puedes entrenar con ella o duplicarla para editar tu propia copia.</p>` : ""}
+    <fieldset class="panel route-editor" id="route-form" ${readOnly ? "disabled" : ""}>
+      <legend class="sr-only">${readOnly ? "Datos de la ruta pública" : "Editar ruta"}</legend>
       <div class="form-grid">
         <label class="wide">Nombre<input name="name" value="${escapeAttr(draft.name)}" /></label>
+        ${readOnly ? "" : `<label class="check wide route-visibility"><input type="checkbox" name="is_public" ${draft.is_public ? "checked" : ""} /><span><strong>Hacer pública esta ruta</strong><small>Todos los usuarios podrán verla, entrenar con ella y duplicarla. Solo tú podrás editarla o eliminarla. Desmarca la opción para volver a hacerla privada.</small></span></label>`}
       </div>
       <div class="summary-grid">
         ${readonlyNumber("Distancia total", `${calculated.distance_km.toFixed(2)} km`)}
@@ -1058,16 +1087,16 @@ function renderRouteForm(draft) {
           <h3>Segmentos</h3>
           <p>${draft.segments.length} tramos</p>
         </div>
-        <button data-action="add-segment" type="button">Añadir segmento</button>
+        ${readOnly ? "" : `<button data-action="add-segment" type="button">Añadir segmento</button>`}
       </div>
       <div class="segments-table">${rows}</div>
-    </div>
+    </fieldset>
   `;
 }
 
 function bindEvents() {
   document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
-  document.querySelectorAll("[data-view-action]").forEach((el) => el.addEventListener("click", () => setView(el.dataset.viewAction)));
+  document.querySelectorAll("[data-view-action]").forEach((el) => el.addEventListener("click", () => navigateToView(el.dataset.viewAction)));
   document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("click", async () => {
     await withLoading("Cargando ruta...", async () => {
       state.selectedRoute = await api(`/api/routes/${el.dataset.openRoute}`);
@@ -1084,7 +1113,14 @@ function bindEvents() {
   document.querySelectorAll("[data-open-activity]").forEach((el) => el.addEventListener("click", async () => {
     await withLoading("Cargando actividad...", async () => {
       state.selectedActivity = await api(`/api/activities/${el.dataset.openActivity}`);
-      state.selectedRoute = await api(`/api/routes/${state.selectedActivity.activity.route_id}`);
+      state.selectedRoute = null;
+      if (state.selectedActivity.activity.route_id) {
+        try {
+          state.selectedRoute = await api(`/api/routes/${state.selectedActivity.activity.route_id}`);
+        } catch (error) {
+          if (error.status !== 404) throw error;
+        }
+      }
       state.activityModalOpen = true;
     });
   }));
@@ -1210,6 +1246,8 @@ function syncDraftFromForm() {
   const target = currentDraft();
   const nameInput = form.querySelector(`[name="name"]`);
   if (nameInput) target.name = nameInput.value;
+  const publicInput = form.querySelector('[name="is_public"]');
+  if (publicInput) target.is_public = publicInput.checked;
   form.querySelectorAll("[data-segment]").forEach((row) => {
     const index = Number(row.dataset.segment);
     ["start_km", "end_km", "start_altitude_m", "end_altitude_m"].forEach((name) => {
@@ -1320,6 +1358,7 @@ async function saveDraft() {
 }
 
 async function updateRoute() {
+  if (!state.selectedRoute?.is_owner) return;
   syncDraftFromForm();
   if (!validateRouteDraft(state.draft)) return;
   await withLoading("Guardando cambios...", async () => {
@@ -1342,6 +1381,7 @@ async function duplicateRoute() {
 }
 
 async function deleteRoute() {
+  if (!state.selectedRoute?.is_owner) return;
   await withLoading("Eliminando ruta...", async () => {
     await api(`/api/routes/${state.selectedRoute.id}`, { method: "DELETE" });
     state.selectedRoute = null;
@@ -1401,7 +1441,7 @@ function resetTraining() {
 }
 
 function resumeActivity() {
-  if (!state.selectedActivity || state.selectedActivity.activity.status !== "partial") return;
+  if (!state.selectedRoute || !state.selectedActivity || state.selectedActivity.activity.status !== "partial") return;
   state.resumeActivity = state.selectedActivity;
   state.activityModalOpen = false;
   state.training = null;
@@ -2215,6 +2255,7 @@ function draftToRoute(draft) {
 function routeToDraft(route) {
   return calculateRouteFromSegments({
     name: route.name,
+    is_public: Boolean(route.is_public),
     distance_km: route.distance_km,
     elevation_gain_m: route.elevation_gain_m,
     start_altitude_m: route.start_altitude_m,
@@ -2235,6 +2276,7 @@ function routeToDraft(route) {
 function emptyDraft() {
   return {
     name: "",
+    is_public: false,
     distance_km: 0,
     elevation_gain_m: 0,
     start_altitude_m: 0,

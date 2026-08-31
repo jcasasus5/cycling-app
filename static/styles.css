@@ -478,6 +478,43 @@ section {
   gap: 14px;
 }
 
+.route-section {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.route-count {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.route-visibility span {
+  display: grid;
+  gap: 4px;
+}
+
+.route-editor {
+  min-width: 0;
+  margin: 0;
+}
+
+.route-editor:disabled input {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .card,
 .panel,
 .empty-state,

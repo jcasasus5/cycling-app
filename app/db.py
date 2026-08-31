@@ -57,7 +57,8 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS activities (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+              route_id INTEGER REFERENCES routes(id) ON DELETE SET NULL,
+              route_name TEXT NOT NULL,
               started_at TEXT NOT NULL,
               ended_at TEXT NOT NULL,
               status TEXT NOT NULL,
@@ -112,6 +113,55 @@ def init_db() -> None:
         _ensure_sqlite_column(conn, "activities", "strava_activity_id", "TEXT NOT NULL DEFAULT ''")
         _ensure_sqlite_column(conn, "activities", "strava_status", "TEXT NOT NULL DEFAULT ''")
         _ensure_sqlite_column(conn, "activities", "strava_error", "TEXT NOT NULL DEFAULT ''")
+        _ensure_sqlite_column(conn, "routes", "is_public", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_sqlite_column(conn, "activities", "route_name", "TEXT NOT NULL DEFAULT ''")
+        conn.execute("""
+            UPDATE activities SET route_name = COALESCE(
+                (SELECT name FROM routes WHERE routes.id = activities.route_id), 'Ruta eliminada'
+            ) WHERE route_name = ''
+        """)
+        conn.commit()
+        _preserve_activity_routes(conn)
+
+
+def _preserve_activity_routes(conn: sqlite3.Connection) -> None:
+    foreign_keys = conn.execute("PRAGMA foreign_key_list(activities)").fetchall()
+    if any(row["from"] == "route_id" and row["on_delete"] == "SET NULL" for row in foreign_keys):
+        return
+    # SQLite requires a table rebuild to change a foreign key. Disable cascades
+    # only on this connection so dropping the old table cannot delete samples.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'activities'").fetchone()[0]
+        new_schema = schema.replace("CREATE TABLE activities", "CREATE TABLE activities_preserved", 1).replace(
+            "route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE",
+            "route_id INTEGER REFERENCES routes(id) ON DELETE SET NULL",
+            1,
+        )
+        if "CREATE TABLE activities_preserved" not in new_schema or "ON DELETE SET NULL" not in new_schema:
+            raise sqlite3.DatabaseError("No se ha reconocido el esquema de actividades para migrarlo de forma segura.")
+        indexes_and_triggers = conn.execute("""
+            SELECT sql FROM sqlite_master WHERE tbl_name = 'activities'
+            AND type IN ('index', 'trigger') AND sql IS NOT NULL
+        """).fetchall()
+        sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'activities'").fetchone()
+        conn.execute(new_schema)
+        conn.execute("INSERT INTO activities_preserved SELECT * FROM activities")
+        conn.execute("DROP TABLE activities")
+        conn.execute("ALTER TABLE activities_preserved RENAME TO activities")
+        if sequence:
+            conn.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'activities'", (sequence[0],))
+        for row in indexes_and_triggers:
+            conn.execute(row[0])
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise sqlite3.IntegrityError("La migración de actividades no ha superado la comprobación de integridad.")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 @contextmanager
@@ -140,6 +190,7 @@ def row_to_route(row: sqlite3.Row) -> Route:
     return Route(
         id=row["id"],
         name=row["name"],
+        is_public=bool(row["is_public"]),
         distance_km=row["distance_km"],
         elevation_gain_m=row["elevation_gain_m"],
         start_altitude_m=row["start_altitude_m"],
@@ -227,8 +278,8 @@ def create_route(draft: RouteCreate) -> RouteWithSegments:
             """
             INSERT INTO routes (
               name, distance_km, elevation_gain_m, start_altitude_m, end_altitude_m,
-              avg_grade_percent, max_grade_percent, created_at, original_image_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              avg_grade_percent, max_grade_percent, created_at, original_image_path, is_public
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 draft.name,
@@ -240,6 +291,7 @@ def create_route(draft: RouteCreate) -> RouteWithSegments:
                 draft.max_grade_percent,
                 now_iso(),
                 draft.original_image_path,
+                draft.is_public,
             ),
         )
         route_id = cur.lastrowid
@@ -272,7 +324,7 @@ def update_route(route_id: int, draft: RouteCreate) -> RouteWithSegments | None:
             """
             UPDATE routes SET
               name = ?, distance_km = ?, elevation_gain_m = ?, start_altitude_m = ?, end_altitude_m = ?,
-              avg_grade_percent = ?, max_grade_percent = ?, original_image_path = ?
+              avg_grade_percent = ?, max_grade_percent = ?, original_image_path = ?, is_public = ?
             WHERE id = ?
             """,
             (
@@ -284,6 +336,7 @@ def update_route(route_id: int, draft: RouteCreate) -> RouteWithSegments | None:
                 draft.avg_grade_percent,
                 draft.max_grade_percent,
                 draft.original_image_path,
+                draft.is_public,
                 route_id,
             ),
         )
@@ -392,9 +445,7 @@ def list_activities() -> list[Activity]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT activities.*, routes.name AS route_name
-            FROM activities
-            JOIN routes ON routes.id = activities.route_id
+            SELECT * FROM activities
             ORDER BY started_at DESC
             """
         ).fetchall()
@@ -405,9 +456,7 @@ def get_activity(activity_id: int) -> ActivityDetail | None:
     with connect() as conn:
         activity_row = conn.execute(
             """
-            SELECT activities.*, routes.name AS route_name
-            FROM activities
-            JOIN routes ON routes.id = activities.route_id
+            SELECT * FROM activities
             WHERE activities.id = ?
             """,
             (activity_id,),
@@ -493,8 +542,8 @@ def create_activity(draft: ActivityCreate) -> Activity:
             """
             INSERT INTO activities (
               route_id, started_at, ended_at, status, active_seconds, total_seconds, distance_km,
-              avg_power_w, max_power_w, avg_cadence_rpm, avg_speed_kph, completed_elevation_m
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              avg_power_w, max_power_w, avg_cadence_rpm, avg_speed_kph, completed_elevation_m, route_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT name FROM routes WHERE id = ?))
             """,
             (
                 draft.route_id,
@@ -509,6 +558,7 @@ def create_activity(draft: ActivityCreate) -> Activity:
                 draft.avg_cadence_rpm,
                 draft.avg_speed_kph,
                 draft.completed_elevation_m,
+                draft.route_id,
             ),
         )
         activity_id = cur.lastrowid
@@ -545,12 +595,15 @@ def update_activity(activity_id: int, draft: ActivityCreate) -> Activity | None:
         conn.execute(
             """
             UPDATE activities SET
+              route_name = CASE WHEN route_id IS NOT ? THEN (SELECT name FROM routes WHERE id = ?) ELSE route_name END,
               route_id = ?, started_at = ?, ended_at = ?, status = ?, active_seconds = ?,
               total_seconds = ?, distance_km = ?, avg_power_w = ?, max_power_w = ?,
               avg_cadence_rpm = ?, avg_speed_kph = ?, completed_elevation_m = ?
             WHERE id = ?
             """,
             (
+                draft.route_id,
+                draft.route_id,
                 draft.route_id,
                 draft.started_at,
                 draft.ended_at,

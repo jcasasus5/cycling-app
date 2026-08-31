@@ -48,6 +48,8 @@ En el Tacx FLUX 2 Smart es normal ver una secuencia parecida a la de la app ofic
 
 - Biblioteca de rutas con distancia, desnivel, pendiente media y pendiente maxima.
 - Editor de segmentos con altitud inicial/final y pendiente calculada.
+- Rutas privadas por defecto, con opción de compartirlas con todos los usuarios registrados.
+- Biblioteca con tus rutas primero y las rutas públicas de otros usuarios después; copias privadas e independientes.
 - Importacion de perfiles desde imagen usando OpenAI Vision.
 - Grafico uniforme de altimetria en canvas.
 - Entrenamiento en vivo con posicion sobre el perfil.
@@ -109,6 +111,22 @@ http://127.0.0.1:8000
 5. Inicia el entrenamiento.
 6. Guarda parcial, termina manualmente o deja que se complete al llegar al final.
 
+## Rutas públicas y conservación de actividades
+
+Al crear una ruta o abrir una de tus rutas, marca `Hacer pública esta ruta` y guarda los cambios. Todos los usuarios registrados podrán consultarla, entrenar con ella y duplicarla. Solo el creador puede modificarla o eliminarla; los permisos también se comprueban en la API y mediante RLS en Supabase. Desmarca la opción para volver a hacerla privada. Las rutas existentes no se publican automáticamente.
+
+La biblioteca muestra `Tus rutas` primero, incluidas las que has compartido, y después `Rutas públicas` con todas las rutas compartidas por otros usuarios. Se actualiza al entrar en Rutas y carga todas las páginas de Supabase. Al duplicar una ruta, se crea una copia privada con sus segmentos, propiedad del usuario que la duplica; los cambios en esa copia no afectan al original.
+
+Eliminar una ruta **nunca elimina las actividades guardadas sobre ella**, sea pública o privada. Se conservan el nombre registrado, las métricas, las muestras y la descarga TCX. Las actividades siguen siendo privadas. Si la ruta se elimina o deja de ser accesible, su actividad sigue disponible, aunque ya no se puede continuar una actividad parcial sobre esa ruta.
+
+Antes de desplegar este código en Supabase, aplica `supabase/migrations/20260831113544_public_routes.sql`. Incluye la visibilidad, los permisos, la duplicación y el cambio de la relación de actividades a `ON DELETE SET NULL`. La migración opcional de Strava no es necesaria para esta función. En SQLite, la actualización se realiza al arrancar y conserva las actividades y sus muestras existentes dentro de una migración transaccional.
+
+Las pruebas de API y SQLite se ejecutan con `python3 -m pytest -q -s`. La prueba adicional `tests/sql/public_routes.sql` comprueba permisos reales entre dos usuarios en PostgreSQL y revierte sus datos al finalizar. Con un contenedor desechable que tenga el esquema de autenticación de Supabase y las migraciones aplicadas:
+
+```bash
+CYCLING_TEST_POSTGRES_CONTAINER=nombre-del-contenedor python3 -m pytest tests/test_public_routes_postgres.py -q -s
+```
+
 ## OpenAI
 
 Cada usuario configura su propia clave de OpenAI desde `Ajustes`. En produccion se cifra antes de guardarla y nunca se devuelve al navegador despues de almacenarla. Un usuario no puede consultar ni usar la clave de otro.
@@ -131,7 +149,7 @@ El endpoint `GET /api/activities/{id}/export.tcx` utiliza la misma autenticacion
 
 Cada usuario puede conectar su propia cuenta desde `Ajustes`. Cuando termina una actividad, la app genera un archivo TCX con tiempo, distancia, velocidad, cadencia, potencia y altitud virtual, y lo envia a Strava como actividad de bici estatica (`VirtualRide`). Las actividades parciales no se publican.
 
-Para activarla con Supabase, aplica primero `supabase/migrations/202608290001_strava_integration.sql`. Despues registra una aplicacion en el panel de desarrolladores de Strava y configura estas variables en el servidor:
+Para activarla con Supabase, aplica primero `supabase/migrations/20260831113543_strava_integration.sql`. Despues registra una aplicacion en el panel de desarrolladores de Strava y configura estas variables en el servidor:
 
 ```text
 STRAVA_CLIENT_ID
@@ -141,6 +159,27 @@ APP_ENCRYPTION_KEY
 ```
 
 `STRAVA_REDIRECT_URI` debe ser la URL raiz exacta a la que vuelve el navegador, por ejemplo `http://127.0.0.1:8001/` en local o `https://tu-dominio.example/` en produccion. El dominio debe coincidir con el callback registrado en Strava. Los tokens de acceso y renovacion se cifran antes de guardarse y nunca se devuelven al navegador.
+
+## Despliegue automático desde main
+
+`.github/workflows/deploy.yml` ejecuta las pruebas en cada pull request y cada push a `main`. Primero aplica todas las migraciones en PostgreSQL desechable y prueba los permisos entre usuarios. En `main`, si las pruebas pasan, construye la aplicación, aplica las migraciones pendientes a Supabase y despliega ese mismo build en Vercel producción. También se puede ejecutar manualmente desde GitHub Actions.
+
+Configura estos secretos en GitHub, en `Settings > Secrets and variables > Actions` (o en el entorno `production`):
+
+| Secreto | Valor |
+| --- | --- |
+| `VERCEL_TOKEN` | Token de Vercel con acceso al proyecto |
+| `VERCEL_ORG_ID` | `orgId` del archivo local `.vercel/project.json` |
+| `VERCEL_PROJECT_ID` | `projectId` del archivo local `.vercel/project.json` |
+| `SUPABASE_ACCESS_TOKEN` | Token personal de Supabase con acceso al proyecto |
+| `SUPABASE_DB_PASSWORD` | Contraseña de la base de datos del proyecto |
+| `SUPABASE_PROJECT_ID` | Referencia del proyecto Supabase de producción |
+
+No guardes tokens, contraseñas ni archivos `.env` en Git. El workflow comprueba estos secretos y se detiene si falta alguno. Si caduca un token, actualízalo en GitHub y vuelve a ejecutar el workflow.
+
+`vercel.json` desactiva el despliegue directo de la integración Git para `main`: la publicación debe pasar por el workflow para no adelantarse a las migraciones. Los previews de otras ramas conservan su comportamiento. No hay despliegue automático efectivo hasta configurar los secretos anteriores. Se serializan los despliegues y se comprueba que el commit sigue siendo el último de `main` antes de publicarlo.
+
+El historial local de `supabase/migrations/` coincide con las versiones registradas en producción, incluido el índice histórico de imágenes importadas. No cambies versiones de migraciones ya aplicadas ni uses `db reset` contra producción. Si falla una migración, el workflow no despliega. Si falla el despliegue después de migrar, la base de datos no se revierte automáticamente; las migraciones deben ser compatibles con la versión anterior durante la transición.
 
 ## Despliegue Y Seguridad
 
