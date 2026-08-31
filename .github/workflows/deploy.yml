@@ -97,8 +97,8 @@ jobs:
         run: npm install --global vercel@59.10.0
       - name: Build production before changing the database
         run: |
-          vercel pull --yes --environment=production
-          vercel build --prod
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
       - name: Apply pending Supabase migrations
         run: |
           supabase link --project-ref "$SUPABASE_PROJECT_ID"
@@ -110,6 +110,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
       - name: Deploy the tested build to Vercel production
         run: |
-          vercel deploy --prebuilt --prod --yes > deployment-url.txt
+          vercel deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" > deployment-url.txt
           deployment_url="$(tail -n 1 deployment-url.txt)"
           printf 'Production deployment: %s\n' "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
