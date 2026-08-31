@@ -68,7 +68,8 @@ async def import_route_from_image(file: UploadFile, api_key: str) -> ImportResul
     image_b64 = base64.b64encode(contents).decode("ascii")
     client = OpenAI(api_key=api_key)
     response = client.responses.create(
-        model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        reasoning={"effort": "none"},
         input=[
             {
                 "role": "user",
