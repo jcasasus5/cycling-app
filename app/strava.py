@@ -200,7 +200,7 @@ def upload_activity(
             headers={"Authorization": f"Bearer {access_token}"},
             data={
                 "name": detail.activity.route_name,
-                "description": "Actividad de bici estática registrada con Tacx Flux Climber.",
+                "description": "Actividad de bici estática registrada con Climber.",
                 "trainer": "1",
                 "commute": "0",
                 "data_type": "tcx",

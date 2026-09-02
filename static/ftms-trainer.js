@@ -1,9 +1,13 @@
 const FTMS_SERVICE = 0x1826;
+const DEVICE_INFORMATION_SERVICE = 0x180a;
 const FITNESS_MACHINE_FEATURE = 0x2acc;
 const INDOOR_BIKE_DATA = 0x2ad2;
 const SUPPORTED_POWER_RANGE = 0x2ad8;
 const FITNESS_MACHINE_CONTROL_POINT = 0x2ad9;
 const FITNESS_MACHINE_STATUS = 0x2ada;
+const MODEL_NUMBER_STRING = 0x2a24;
+const FIRMWARE_REVISION_STRING = 0x2a26;
+const MANUFACTURER_NAME_STRING = 0x2a29;
 
 const OPCODES = {
   requestControl: 0x00,
@@ -51,11 +55,14 @@ export class FtmsTrainer {
     this.indoorBikeData = null;
     this.controlPoint = null;
     this.machineStatus = null;
+    this.deviceInfo = null;
     this.features = {
       rawMachineFeatures: 0,
       rawTargetSettingFeatures: 0,
       targetPower: null,
+      simulationParameters: null,
       spinDownControl: null,
+      weightSimulation: false,
       powerRange: null
     };
     this.pendingResponses = new Map();
@@ -72,19 +79,16 @@ export class FtmsTrainer {
       throw new Error("Este navegador no soporta Web Bluetooth. Usa Chrome o Edge.");
     }
 
-    this.emitStatus("Selecciona el Tacx FLUX 2 Smart...");
+    this.emitStatus("Selecciona un rodillo compatible con Bluetooth FTMS...");
     this.device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { services: [FTMS_SERVICE] },
-        { namePrefix: "Tacx" },
-        { namePrefix: "FLUX" }
-      ],
-      optionalServices: [FTMS_SERVICE]
+      filters: [{ services: [FTMS_SERVICE] }],
+      optionalServices: [FTMS_SERVICE, DEVICE_INFORMATION_SERVICE]
     });
     this.device.addEventListener("gattserverdisconnected", () => this.handleDisconnect());
 
     this.emitStatus("Conectando al rodillo...");
     this.server = await this.device.gatt.connect();
+    this.deviceInfo = await readDeviceInformation(this.server, this.device.name);
     const service = await this.server.getPrimaryService(FTMS_SERVICE);
     this.feature = await getOptionalCharacteristic(service, FITNESS_MACHINE_FEATURE);
     this.supportedPowerRange = await getOptionalCharacteristic(service, SUPPORTED_POWER_RANGE);
@@ -153,6 +157,9 @@ export class FtmsTrainer {
 
   async setGrade(gradePercent, { force = false } = {}) {
     if (!this.connected) return;
+    if (this.features.simulationParameters === false) {
+      throw new Error("Este rodillo no anuncia control de pendiente mediante FTMS.");
+    }
     const roundedGrade = Math.round(gradePercent * 10) / 10;
     if (!force && this.lastGrade !== null && Math.abs(roundedGrade - this.lastGrade) < 0.1) return;
     this.lastGrade = roundedGrade;
@@ -246,11 +253,14 @@ export class FtmsTrainer {
     this.indoorBikeData = null;
     this.controlPoint = null;
     this.machineStatus = null;
+    this.deviceInfo = null;
     this.features = {
       rawMachineFeatures: 0,
       rawTargetSettingFeatures: 0,
       targetPower: null,
+      simulationParameters: null,
       spinDownControl: null,
+      weightSimulation: false,
       powerRange: null
     };
     this.pendingResponses.forEach(({ timer, reject }) => {
@@ -312,7 +322,9 @@ export function parseFitnessMachineFeatures(value) {
     rawMachineFeatures: readUint32(value, 0),
     rawTargetSettingFeatures,
     targetPower: value.byteLength >= 8 ? Boolean(rawTargetSettingFeatures & (1 << 3)) : null,
+    simulationParameters: value.byteLength >= 8 ? Boolean(rawTargetSettingFeatures & (1 << 13)) : null,
     spinDownControl: value.byteLength >= 8 ? Boolean(rawTargetSettingFeatures & (1 << 15)) : null,
+    weightSimulation: false,
     powerRange: null
   };
 }
@@ -371,6 +383,31 @@ async function getOptionalCharacteristic(service, uuid) {
     if (error.name === "NotFoundError") return null;
     throw error;
   }
+}
+
+async function readDeviceInformation(server, fallbackName = "") {
+  const info = {
+    name: fallbackName || "Rodillo FTMS",
+    manufacturer: "",
+    model: "",
+    firmware: ""
+  };
+  try {
+    const service = await server.getPrimaryService(DEVICE_INFORMATION_SERVICE);
+    info.manufacturer = await readOptionalStringCharacteristic(service, MANUFACTURER_NAME_STRING);
+    info.model = await readOptionalStringCharacteristic(service, MODEL_NUMBER_STRING);
+    info.firmware = await readOptionalStringCharacteristic(service, FIRMWARE_REVISION_STRING);
+  } catch (error) {
+    if (error.name !== "NotFoundError") throw error;
+  }
+  return info;
+}
+
+async function readOptionalStringCharacteristic(service, uuid) {
+  const characteristic = await getOptionalCharacteristic(service, uuid);
+  if (!characteristic) return "";
+  const value = await characteristic.readValue();
+  return new TextDecoder().decode(value).replace(/\0+$/g, "").trim();
 }
 
 function readUint16(value, offset) {

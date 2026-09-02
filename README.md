@@ -1,6 +1,6 @@
-# Tacx Flux Climber
+# Climber Indoor Cycling
 
-Tacx Flux Climber es una aplicacion web para entrenar en un rodillo inteligente usando perfiles reales de subida. Permite crear o importar rutas de altimetria, controlar la dureza del rodillo segun la pendiente de cada tramo, registrar la actividad y guardar entrenamientos completos o parciales.
+Climber es una aplicacion web para entrenar en un rodillo inteligente usando perfiles reales de subida. Permite crear o importar rutas de altimetria, controlar la dureza del rodillo segun la pendiente de cada tramo, registrar la actividad y guardar entrenamientos completos o parciales.
 
 FastAPI sirve la aplicacion, el navegador se conecta directamente al rodillo por Bluetooth y existen dos modos:
 
@@ -9,14 +9,14 @@ FastAPI sirve la aplicacion, el navegador se conecta directamente al rodillo por
 
 ## Rodillos Compatibles
 
-La conexion real al rodillo usa Bluetooth Low Energy con el estandar FTMS (Fitness Machine Service). Esta implementacion esta orientada y probada a nivel de protocolo para el Tacx FLUX 2 Smart, pero tambien puede funcionar con otros rodillos inteligentes que expongan:
+La conexion real al rodillo usa Bluetooth Low Energy con el estandar FTMS (Fitness Machine Service). No se filtra por marca o modelo: al conectar, la app consulta las capacidades anunciadas por el dispositivo y usa solo las funciones disponibles. El rodillo debe exponer:
 
 - Servicio FTMS (`0x1826`).
 - `Indoor Bike Data` para leer velocidad, cadencia y potencia.
 - `Fitness Machine Control Point` para enviar control de simulacion.
 - Soporte de simulacion de bici indoor para enviar pendiente.
 
-En la practica, esto cubre rodillos smart modernos con Bluetooth FTMS. ANT+ FE-C no esta implementado en esta app, porque desde un navegador web local no hay una API ANT+ estandar equivalente a Web Bluetooth.
+En la practica, esto cubre rodillos smart modernos con Bluetooth FTMS. El modo ERG y la calibracion solo se habilitan cuando el equipo anuncia esas capacidades. ANT+ FE-C no esta implementado, porque desde un navegador web local no hay una API ANT+ estandar equivalente a Web Bluetooth.
 
 ## Como Controla El Rodillo
 
@@ -26,7 +26,7 @@ Durante un entrenamiento, la app:
 - Calcula el avance virtual por la ruta usando la velocidad recibida.
 - Busca la pendiente correspondiente al kilometro actual.
 - Envia esa pendiente al rodillo mediante FTMS.
-- Limita la pendiente enviada usando el ajuste `Pendiente maxima rodillo`.
+- Puede limitar la pendiente enviada usando un valor manual apropiado para el modelo; `0` deja el control del limite al rodillo.
 - Puede bloquear pendientes negativas si se desactiva ese ajuste.
 - Al pausar, guardar o terminar, intenta devolver el rodillo a `0%` y pausar el control FTMS.
 
@@ -42,7 +42,7 @@ Desde `Ajustes` puedes conectar el rodillo y usar `Calibrar ahora`. La calibraci
 4. Cuando el rodillo lo indique, dejas de pedalear.
 5. La app espera el resultado de calibracion.
 
-En el Tacx FLUX 2 Smart es normal ver una secuencia parecida a la de la app oficial de Tacx: acelerar hasta una velocidad objetivo y dejar de pedalear. Si el rodillo no anuncia soporte FTMS de spindown, la app no ofrece calibracion desde el navegador.
+Cada fabricante puede presentar una secuencia distinta. Si el rodillo no anuncia soporte FTMS de spindown, la app no ofrece calibracion desde el navegador.
 
 ## Funciones Principales
 
@@ -58,7 +58,7 @@ En el Tacx FLUX 2 Smart es normal ver una secuencia parecida a la de la app ofic
 - Guardado de actividades parciales o completadas.
 - Historial de actividades con distancia, desnivel, potencia, cadencia y velocidad.
 - Conexion OAuth por usuario con Strava y subida automatica de actividades completadas como `VirtualRide`.
-- Ajustes de pendiente maxima, pendientes negativas, suavizado, peso del ciclista y peso de la bici.
+- Ajustes de pendiente maxima, pendientes negativas, peso del ciclista y peso de la bici.
 
 ## Requisitos
 
@@ -107,7 +107,7 @@ http://127.0.0.1:8000
 1. Crea una ruta manualmente o importa una imagen de altimetria.
 2. Revisa y guarda los segmentos.
 3. Entra en una ruta y pulsa `Entrenar`.
-4. Pulsa `Conectar Tacx` y selecciona el rodillo.
+4. Pulsa `Conectar rodillo` y selecciona un equipo Bluetooth FTMS.
 5. Inicia el entrenamiento.
 6. Guarda parcial, termina manualmente o deja que se complete al llegar al final.
 

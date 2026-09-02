@@ -42,7 +42,8 @@ const state = {
     status: "Rodillo no conectado",
     metrics: emptyTrainerMetrics(),
     lastDataAt: null,
-    features: null
+    features: null,
+    deviceInfo: null
   },
   calibration: emptyCalibrationState(),
   profileTest: emptyProfileTestState(),
@@ -191,11 +192,11 @@ function render() {
     return;
   }
   document.body.classList.toggle("auth-screen", Boolean(state.config?.auth_enabled && !state.session));
-  const account = document.querySelector("[data-user-account]");
-  if (account) {
+  document.querySelectorAll("[data-user-account]").forEach((account) => {
     account.hidden = !state.session;
-    account.querySelector("[data-user-email]").textContent = state.session?.user?.email || "";
-  }
+    const email = account.querySelector("[data-user-email]");
+    if (email) email.textContent = state.session?.user?.email || "";
+  });
   if (state.config?.auth_enabled && !state.session) {
     app.innerHTML = renderAuth();
     if (state.busyText) app.insertAdjacentHTML("beforeend", renderBusyOverlay());
@@ -230,21 +231,35 @@ function renderAuth() {
   const signingUp = state.authMode === "signup";
   const recovering = state.authMode === "recovery";
   return `
-    <section class="auth-card">
-      <div>
-        <span class="eyebrow">Tacx Flux Climber</span>
-        <h2>${recovering ? "Recuperar contraseña" : signingUp ? "Crear cuenta" : "Iniciar sesión"}</h2>
-        <p>${recovering ? "Te enviaremos un enlace para elegir una nueva contraseña." : signingUp ? "Tus actividades, ajustes y clave de OpenAI serán privados. Tú decides qué rutas compartir." : "Accede a tus rutas y entrenamientos."}</p>
+    <section class="auth-layout">
+      <div class="auth-visual">
+        <div class="auth-visual-brand">
+          <span class="auth-logo" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M7 33 17 19l7 9 6-12 11 17"/><circle cx="35" cy="13" r="3"/></svg></span>
+          <span><strong>Climber</strong><small>Indoor cycling studio</small></span>
+        </div>
+        <div class="auth-visual-copy">
+          <span class="eyebrow">Entrena con intención</span>
+          <h1>Tu próxima cima empieza aquí.</h1>
+          <p>Crea rutas, controla tu rodillo y convierte cada pedalada en progreso.</p>
+          <div class="auth-benefits"><span>Rutas a medida</span><span>Datos reales</span><span>Tu ritmo</span></div>
+        </div>
       </div>
-      <form data-auth-form>
-        <label>Correo electrónico<input type="email" name="email" autocomplete="email" required /></label>
-        ${recovering ? "" : `<label>Contraseña<input type="password" name="password" autocomplete="${signingUp ? "new-password" : "current-password"}" minlength="8" required /></label>`}
-        <button class="primary" type="submit">${recovering ? "Enviar enlace" : signingUp ? "Crear cuenta" : "Entrar"}</button>
-      </form>
-      ${state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : ""}
-      <div class="auth-links">
-        <button data-action="toggle-auth">${signingUp || recovering ? "Volver a iniciar sesión" : "Crear una cuenta"}</button>
-        ${!signingUp && !recovering ? `<button data-action="recover-password">He olvidado mi contraseña</button>` : ""}
+      <div class="auth-card">
+        <div class="auth-heading">
+          <span class="eyebrow">${recovering ? "Vuelve a tu cuenta" : signingUp ? "Empieza tu viaje" : "Bienvenido de nuevo"}</span>
+          <h2>${recovering ? "Recuperar contraseña" : signingUp ? "Crear cuenta" : "Iniciar sesión"}</h2>
+          <p>${recovering ? "Te enviaremos un enlace para elegir una nueva contraseña." : signingUp ? "Tus actividades, ajustes y clave de OpenAI serán privados. Tú decides qué rutas compartir." : "Accede a tus rutas y entrenamientos."}</p>
+        </div>
+        <form data-auth-form>
+          <label>Correo electrónico<input type="email" name="email" autocomplete="email" placeholder="tu@email.com" required /></label>
+          ${recovering ? "" : `<label>Contraseña<input type="password" name="password" autocomplete="${signingUp ? "new-password" : "current-password"}" minlength="8" placeholder="Mínimo 8 caracteres" required /></label>`}
+          <button class="primary auth-submit" type="submit">${recovering ? "Enviar enlace" : signingUp ? "Crear mi cuenta" : "Entrar a Climber"}</button>
+        </form>
+        ${state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : ""}
+        <div class="auth-links">
+          <button data-action="toggle-auth">${signingUp || recovering ? "Volver a iniciar sesión" : "Crear una cuenta"}</button>
+          ${!signingUp && !recovering ? `<button data-action="recover-password">He olvidado mi contraseña</button>` : ""}
+        </div>
       </div>
     </section>
   `;
@@ -441,18 +456,29 @@ function renderRoutes() {
   const ownRoutes = state.routes.filter((route) => route.is_owner);
   const publicRoutes = state.routes.filter((route) => !route.is_owner && route.is_public);
   return `
-    <section>
-      <header class="page-header">
-        <div><span class="eyebrow">Biblioteca</span><h2>Rutas</h2><p>Crea tus recorridos y descubre los de la comunidad.</p></div>
-        <button class="primary" data-view-action="import">Crear ruta</button>
+    <section class="page-section routes-page">
+      <header class="page-header page-hero routes-hero">
+        <div class="hero-copy">
+          <span class="eyebrow">Tu próxima aventura</span>
+          <h2>Rutas para llegar<br />más lejos.</h2>
+          <p>Crea recorridos a tu medida, encuentra nuevas subidas y entrena cada detalle desde casa.</p>
+          <div class="hero-tags" aria-label="Funciones"><span>Explora</span><span>Entrena</span><span>Comparte</span></div>
+        </div>
+        <button class="primary hero-action" data-view-action="import"><span aria-hidden="true">+</span> Crear nueva ruta</button>
       </header>
-      <section class="route-section" aria-labelledby="own-routes-title">
-        <header><h3 id="own-routes-title">Tus rutas <span class="route-count">${ownRoutes.length}</span></h3><p>Solo tú puedes editarlas o eliminarlas. Elige cuáles hacer públicas.</p></header>
+      <section class="route-section own-routes" aria-labelledby="own-routes-title">
+        <header class="section-header">
+          <span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+          <div><span class="section-kicker">Tu biblioteca</span><h3 id="own-routes-title">Tus rutas <span class="route-count">${ownRoutes.length}</span></h3><p>Solo tú puedes editarlas o eliminarlas. Elige cuáles hacer públicas.</p></div>
+        </header>
         <div class="grid-list">${ownRoutes.map(renderRouteCard).join("")}</div>
         ${ownRoutes.length ? "" : `<div class="empty-state"><strong>Aún no tienes rutas propias</strong><p>Crea una ruta o duplica una de la comunidad.</p><button class="primary" data-view-action="import">Crear ruta</button></div>`}
       </section>
-      <section class="route-section" aria-labelledby="public-routes-title">
-        <header><h3 id="public-routes-title">Rutas públicas <span class="route-count">${publicRoutes.length}</span></h3><p>Rutas compartidas por otros usuarios. Entrena con ellas o duplícalas para editarlas.</p></header>
+      <section class="route-section public-routes" aria-labelledby="public-routes-title">
+        <header class="section-header">
+          <span class="section-icon coral" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>
+          <div><span class="section-kicker">Comunidad</span><h3 id="public-routes-title">Rutas públicas <span class="route-count">${publicRoutes.length}</span></h3><p>Recorridos compartidos por otros ciclistas. Entrena con ellos o crea tu propia versión.</p></div>
+        </header>
         <div class="grid-list">${publicRoutes.map(renderRouteCard).join("")}</div>
         ${publicRoutes.length ? "" : `<div class="empty-state"><strong>Aún no hay rutas públicas de otros usuarios</strong></div>`}
       </section>
@@ -462,14 +488,19 @@ function renderRoutes() {
 
 function renderRouteCard(route) {
   return `
-    <article class="card route-card" data-open-route="${route.id}" role="button" tabindex="0">
+    <article class="card route-card ${route.is_owner ? "owned" : "community"}" data-open-route="${route.id}" role="button" tabindex="0">
+      <div class="route-card-visual" aria-hidden="true">
+        <span class="route-symbol"><svg viewBox="0 0 32 32"><path d="M3 25 10 14l6 7 5-10 8 14"/><path d="M4 28h24"/></svg></span>
+        <svg class="route-profile" viewBox="0 0 240 72" preserveAspectRatio="none"><path d="M0 63c22-3 31-21 50-20 17 1 23 13 39 9 20-5 27-36 48-33 14 2 20 26 36 25 24-2 30-30 67-34V72H0Z"/></svg>
+        <span class="route-ribbon">${route.max_grade_percent.toFixed(1)}% max</span>
+      </div>
       <div class="card-top">
         <div>
           <span class="eyebrow">${route.is_public ? "Pública" : "Privada"}${route.is_owner ? " · Tu ruta" : " · Comunidad"}</span>
           <h3>${escapeHtml(route.name)}</h3>
           <p>${new Date(route.created_at).toLocaleDateString("es-ES")}</p>
         </div>
-        <span class="route-ribbon">${route.max_grade_percent.toFixed(1)}% max</span>
+        <span class="card-arrow" aria-hidden="true">↗</span>
       </div>
       <div class="route-stats">
         ${statPill("Distancia", `${route.distance_km.toFixed(2)} km`)}
@@ -483,9 +514,10 @@ function renderRouteCard(route) {
 
 function renderImport() {
   return `
-    <section>
-      <header class="page-header">
-        <div><span class="eyebrow">Editor</span><h2>Crear ruta</h2><p>${state.draft.name ? escapeHtml(state.draft.name) : "Nueva ruta"}</p></div>
+    <section class="page-section editor-page">
+      <header class="page-header editor-hero">
+        <div><span class="eyebrow">Diseña tu próximo reto</span><h2>Crear ruta</h2><p>${state.draft.name ? escapeHtml(state.draft.name) : "Importa una altimetría o construye el recorrido tramo a tramo."}</p></div>
+        <span class="header-illustration" aria-hidden="true"><svg viewBox="0 0 220 100"><path d="M5 87c31-4 37-28 65-27 25 1 28 21 48 14 25-9 27-52 55-50 17 1 23 27 42 24"/><circle cx="173" cy="17" r="6"/></svg></span>
       </header>
       <div class="upload-panel">
         <label class="dropzone" data-dropzone for="image-file">
@@ -511,7 +543,7 @@ function renderRouteModal() {
   return `
     <div class="modal-backdrop" data-action="close-route-modal">
       <section class="modal" role="dialog" aria-modal="true" aria-label="Detalle de ruta" data-modal-panel>
-        <header class="page-header">
+        <header class="page-header modal-header">
           <div>
             <span class="eyebrow">Detalle de ruta</span>
             <h2>${escapeHtml(route.name)}</h2>
@@ -548,8 +580,8 @@ function renderRouteDetail() {
   const route = state.selectedRoute;
   if (!route) return `<div class="empty-state">Selecciona una ruta.</div>`;
   return `
-    <section>
-      <header class="page-header">
+    <section class="page-section route-detail-page">
+      <header class="page-header detail-hero">
         <div><span class="eyebrow">Detalle de ruta</span><h2>${escapeHtml(route.name)}</h2><p>${route.distance_km.toFixed(2)} km · ${Math.round(route.elevation_gain_m)} m+</p></div>
         <div class="actions">
           <button data-action="duplicate-route">Duplicar</button>
@@ -581,11 +613,11 @@ function renderTraining() {
   const connectDisabled = state.trainer.connecting || state.trainer.connected;
   const rideStatus = t.activityId ? "Continuando actividad parcial" : t.running ? (paused ? "Pausada" : "En marcha") : "Preparada";
   return `
-    <section>
-      <header class="page-header">
+    <section class="page-section training-page">
+      <header class="page-header training-hero">
         <div><span class="eyebrow">Entrenamiento</span><h2>${escapeHtml(route.name)}</h2><p>${rideStatus} · real ${realGrade.toFixed(1)}% · rodillo ${trainerGrade.toFixed(1)}%</p></div>
         <div class="actions">
-          <button data-action="connect-trainer" ${connectDisabled ? "disabled" : ""}>${state.trainer.connecting ? "Conectando..." : state.trainer.connected ? "Tacx conectado" : "Conectar Tacx"}</button>
+          <button data-action="connect-trainer" ${connectDisabled ? "disabled" : ""}>${state.trainer.connecting ? "Conectando..." : state.trainer.connected ? "Rodillo conectado" : "Conectar rodillo"}</button>
           <button data-action="toggle-training" ${state.trainer.connected ? "" : "disabled"}>${t.running ? "Pausar manual" : "Iniciar"}</button>
           <button data-action="save-partial">Guardar parcial</button>
           <button class="primary" data-action="save-completed">Terminar</button>
@@ -609,7 +641,7 @@ function renderTraining() {
           <div class="panel trainer-panel">
             <span class="eyebrow">Conexion FTMS</span>
             <strong>${escapeHtml(state.trainer.status)}</strong>
-            <p>${state.trainer.connected ? "Leyendo datos reales del Tacx y enviando la pendiente de la ruta." : "Usa Chrome o Edge y conecta el rodillo por Bluetooth."}</p>
+            <p>${state.trainer.connected ? trainerControlSummary() : "Usa Chrome o Edge y conecta un rodillo Bluetooth FTMS."}</p>
             ${state.trainer.connected ? `<button data-action="disconnect-trainer">Desconectar</button>` : ""}
           </div>
           <div class="metrics">
@@ -630,6 +662,7 @@ function renderActivities() {
   const maxPower = state.activities.reduce((max, activity) => Math.max(max, activity.max_power_w), 0);
   const cards = state.activities.map((activity) => `
     <article class="card activity-card" data-open-activity="${activity.id}" role="button" tabindex="0">
+      <div class="activity-card-accent" aria-hidden="true"></div>
       <div class="card-top">
         <div>
           <span class="eyebrow">${new Date(activity.started_at).toLocaleDateString("es-ES")}</span>
@@ -650,8 +683,11 @@ function renderActivities() {
     </article>
   `).join("");
   return `
-    <section>
-      <header class="page-header"><div><span class="eyebrow">Historial</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados · Abre una actividad para descargar sus datos.</p></div></header>
+    <section class="page-section activities-page">
+      <header class="page-header activities-hero">
+        <div><span class="eyebrow">Cada kilómetro cuenta</span><h2>Actividades</h2><p>${state.activities.length} entrenamientos guardados · Revive tus sesiones y descarga todos sus datos.</p></div>
+        <span class="header-illustration activity-illustration" aria-hidden="true"><svg viewBox="0 0 220 100"><path d="M9 74h31l12-30 18 42 19-58 23 46h42l15-31 19 31h24"/><circle cx="190" cy="27" r="7"/></svg></span>
+      </header>
       <div class="dashboard-strip">
         ${metric("Actividades", state.activities.length)}
         ${metric("Kilometros", `${totalKm.toFixed(1)} km`)}
@@ -670,7 +706,7 @@ function renderActivityModal() {
   return `
     <div class="modal-backdrop" data-action="close-activity-modal">
       <section class="modal" role="dialog" aria-modal="true" aria-label="Detalle de actividad" data-modal-panel>
-      <header class="page-header">
+      <header class="page-header modal-header">
         <div><span class="eyebrow">Detalle de actividad</span><h2>${escapeHtml(activity.route_name)}</h2><p>${activity.status === "completed" ? "Completada" : "Parcial"} · ${activity.distance_km.toFixed(2)} km · ${formatSeconds(activity.active_seconds)}</p></div>
         <div class="actions">
           ${activity.status === "partial" && state.selectedRoute ? `<button class="primary" data-action="resume-activity">Continuar</button>` : ""}
@@ -705,9 +741,9 @@ function renderSettings() {
   const s = state.settings;
   const keyStatus = s.openai_api_key_configured ? "Hay una clave guardada. Escribe otra solo para reemplazarla." : "No hay ninguna clave guardada.";
   return `
-    <section>
-      <header class="page-header">
-        <div><span class="eyebrow">Preferencias</span><h2>Ajustes</h2><p>OpenAI, rodillo y simulación</p></div>
+    <section class="page-section settings-page">
+      <header class="page-header settings-hero">
+        <div><span class="eyebrow">Tu experiencia, a tu medida</span><h2>Ajustes</h2><p>Configura el rodillo, las integraciones y el comportamiento de la simulación.</p></div>
         <button class="primary" data-action="save-settings">Guardar ajustes</button>
       </header>
       ${renderTrainerSettingsPanel()}
@@ -715,11 +751,11 @@ function renderSettings() {
       <div class="panel form-grid settings-panel">
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="" autocomplete="off" placeholder="${s.openai_api_key_configured ? "Clave guardada" : "sk-..."}" /><small>${keyStatus}</small></label>
         <label class="check wide"><input type="checkbox" name="clear_openai_api_key" /> Eliminar la clave de OpenAI guardada</label>
-        <label>Pendiente máxima rodillo<input type="number" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /></label>
-        <label>Peso ciclista<input type="number" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /></label>
-        <label>Peso bici<input type="number" step="0.1" name="bike_weight_kg" value="${s.bike_weight_kg}" /></label>
+        <label>Límite manual de pendiente<input type="number" min="0" max="100" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /><small>Configúralo según el fabricante. Usa 0 para no aplicar un límite adicional desde la app.</small></label>
+        <label>Peso ciclista<input type="number" min="20" max="300" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /><small>Se usa para calcular tu FTP relativo en W/kg.</small></label>
+        <label>Peso bici<input type="number" min="0" max="50" step="0.1" name="bike_weight_kg" value="${s.bike_weight_kg}" /><small>Se conserva para la simulación física cuando el protocolo conectado permita utilizarlo.</small></label>
         <label class="check"><input type="checkbox" name="enable_negative_grades" ${s.enable_negative_grades ? "checked" : ""} /> Pendientes negativas</label>
-        <label class="check"><input type="checkbox" name="smooth_grade_changes" ${s.smooth_grade_changes ? "checked" : ""} /> Suavizar cambios</label>
+        <p class="settings-note wide"><strong>Compatibilidad:</strong> la app consulta las capacidades anunciadas por cada rodillo y solo utiliza las funciones FTMS disponibles. FTMS estándar no permite enviar los pesos; no se falsean modificando la pendiente ni los coeficientes de rodadura.</p>
       </div>
       ${state.config.auth_enabled ? `
         <div class="panel form-grid password-panel">
@@ -738,8 +774,8 @@ function renderStravaSettingsPanel() {
       <div class="panel integration-panel">
         <div>
           <span class="eyebrow">Strava</span>
-          <h3>Conexión automática no configurada</h3>
-          <p>Puedes descargar el TCX desde el detalle de cualquier actividad e importarlo manualmente en Strava. La conexión automática seguirá disponible cuando configures las credenciales de Strava en el servidor.</p>
+          <h3>Conexión automática no configurada (Pendiente...)</h3>
+          <p>Por ahora, puedes descargar el TCX desde el detalle de cualquier actividad e importarlo manualmente en Strava.</p>
         </div>
         <span class="status-chip partial">No disponible</span>
       </div>
@@ -799,8 +835,8 @@ function renderProfile() {
   const updatedAt = state.settings?.ftp_updated_at ? new Date(state.settings.ftp_updated_at).toLocaleDateString("es-ES") : "Sin test";
   const method = formatFtpMethod(state.settings?.ftp_method || "");
   return `
-    <section>
-      <header class="page-header">
+    <section class="page-section profile-page">
+      <header class="page-header profile-hero">
         <div>
           <span class="eyebrow">Perfil</span>
           <h2>FTP y zonas</h2>
@@ -854,7 +890,7 @@ function renderFtpTestPanel() {
         <div>
           <span class="eyebrow">Test guiado</span>
           <h3>${running ? `${formatFtpMethod(mode)} en marcha` : "Elige un protocolo"}</h3>
-          <p>${escapeHtml(t.message || "Calienta el rodillo, conecta el Tacx y usa un protocolo repetible para comparar tu forma.")}</p>
+          <p>${escapeHtml(t.message || "Calienta el rodillo, conéctalo y usa un protocolo repetible para comparar tu forma.")}</p>
         </div>
         <span class="status-chip ${running ? "partial" : ""}">${running ? phaseLabel : "Listo"}</span>
       </div>
@@ -961,7 +997,7 @@ function renderProfileTrainerPanel() {
     <div class="panel trainer-panel">
       <span class="eyebrow">Rodillo</span>
       <strong>${escapeHtml(state.trainer.status)}</strong>
-      <p>${state.trainer.connected ? "FTMS conectado. La app intentara usar ERG para los objetivos de calentamiento y ramp test." : "Conecta el Tacx con Chrome o Edge antes de iniciar un test."}</p>
+      <p>${state.trainer.connected ? "FTMS conectado. La app usará ERG solo si el rodillo lo anuncia." : "Conecta un rodillo Bluetooth FTMS con Chrome o Edge antes de iniciar un test."}</p>
       <div class="metrics compact">
         ${metric("Rango ERG", rangeLabel)}
         ${metric("Potencia", `${Math.round(state.trainer.metrics.power_w || 0)} W`)}
@@ -990,11 +1026,12 @@ function renderFtpHistory() {
 function renderTrainerSettingsPanel() {
   const metrics = state.trainer.metrics;
   const calibrationDisabled = !state.trainer.connected || state.trainer.features?.spinDownControl === false;
+  const features = state.trainer.features;
   return `
     <div class="panel trainer-settings-panel">
       <div>
         <span class="eyebrow">Rodillo</span>
-        <h3>Tacx FLUX 2 Smart</h3>
+        <h3>${escapeHtml(connectedTrainerName())}</h3>
         <p>${escapeHtml(state.trainer.status)}</p>
       </div>
       <div class="trainer-settings-actions">
@@ -1006,6 +1043,9 @@ function renderTrainerSettingsPanel() {
         ${metric("Velocidad", `${Number(metrics.speed_kph || 0).toFixed(1)} km/h`)}
         ${metric("Cadencia", `${Math.round(metrics.cadence_rpm || 0)} rpm`)}
         ${metric("Potencia", `${Math.round(metrics.power_w || 0)} W`)}
+        ${metric("Pendiente", formatCapability(features?.simulationParameters))}
+        ${metric("ERG", formatCapability(features?.targetPower))}
+        ${metric("Calibración", formatCapability(features?.spinDownControl))}
       </div>
     </div>
   `;
@@ -1021,7 +1061,7 @@ function renderCalibrationModal() {
         <header class="page-header">
           <div>
             <span class="eyebrow">Calibracion</span>
-            <h2>Tacx FLUX 2 Smart</h2>
+            <h2>${escapeHtml(connectedTrainerName())}</h2>
             <p>${escapeHtml(c.message)}</p>
           </div>
           <button data-action="close-calibration">Cerrar</button>
@@ -1095,7 +1135,7 @@ function renderRouteForm(draft, readOnly = false) {
 }
 
 function bindEvents() {
-  document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
+  document.querySelectorAll("[data-action='logout']").forEach((button) => button.addEventListener("click", logout));
   document.querySelectorAll("[data-view-action]").forEach((el) => el.addEventListener("click", () => navigateToView(el.dataset.viewAction)));
   document.querySelectorAll("[data-open-route]").forEach((el) => el.addEventListener("click", async () => {
     await withLoading("Cargando ruta...", async () => {
@@ -1467,6 +1507,7 @@ async function connectTrainer() {
           state.trainer.metrics = emptyTrainerMetrics();
           state.trainer.lastDataAt = null;
           state.trainer.features = null;
+          state.trainer.deviceInfo = null;
           state.calibration = emptyCalibrationState();
           if (state.training?.running) {
             state.training.running = false;
@@ -1489,8 +1530,11 @@ async function connectTrainer() {
       state.trainer.connected = true;
       state.trainer.connecting = false;
       state.trainer.features = trainerClient.features;
+      state.trainer.deviceInfo = trainerClient.deviceInfo;
       await sendCurrentGradeToTrainer(true);
-      showMessage("Tacx conectado. Ya puedes iniciar el entrenamiento.");
+      showMessage(state.trainer.features?.simulationParameters === false
+        ? "Rodillo conectado. Registra datos y ERG si está disponible, pero no anuncia control FTMS de pendiente."
+        : "Rodillo conectado. Ya puedes iniciar el entrenamiento.");
     } catch (error) {
       state.trainer.connected = false;
       state.trainer.connecting = false;
@@ -1511,6 +1555,7 @@ async function disconnectTrainer() {
     state.trainer.metrics = emptyTrainerMetrics();
     state.trainer.lastDataAt = null;
     state.trainer.features = null;
+    state.trainer.deviceInfo = null;
     state.calibration = emptyCalibrationState();
   });
 }
@@ -1614,7 +1659,7 @@ function formatCalibrationSpeedTarget(calibration) {
 
 async function toggleTraining() {
   if (!state.trainer.connected) {
-    showMessage("Conecta el Tacx FLUX 2 Smart antes de iniciar.");
+    showMessage("Conecta un rodillo Bluetooth FTMS antes de iniciar.");
     return;
   }
   if (!state.training.running) {
@@ -1683,6 +1728,7 @@ function hasLiveTrainerData() {
 
 async function sendCurrentGradeToTrainer(force = false) {
   if (!trainerClient?.connected || !state.selectedRoute || !state.training) return;
+  if (state.trainer.features?.simulationParameters === false) return;
   if (gradeCommandPending) return;
   const segment = getSegmentAtKm(state.selectedRoute.segments, state.training.km);
   const grade = applyTrainerGradeLimit(segment?.grade_percent ?? 0);
@@ -2008,7 +2054,6 @@ async function saveSettingsPayload(overrides = {}) {
     clear_openai_api_key: false,
     max_trainer_grade_percent: s.max_trainer_grade_percent,
     enable_negative_grades: s.enable_negative_grades,
-    smooth_grade_changes: s.smooth_grade_changes,
     rider_weight_kg: s.rider_weight_kg,
     bike_weight_kg: s.bike_weight_kg,
     ftp_w: s.ftp_w || 0,
@@ -2027,7 +2072,6 @@ async function saveSettings() {
     clear_openai_api_key: root.querySelector("[name='clear_openai_api_key']").checked,
     max_trainer_grade_percent: Number(root.querySelector("[name='max_trainer_grade_percent']").value),
     enable_negative_grades: root.querySelector("[name='enable_negative_grades']").checked,
-    smooth_grade_changes: root.querySelector("[name='smooth_grade_changes']").checked,
     rider_weight_kg: Number(root.querySelector("[name='rider_weight_kg']").value),
     bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
   };
@@ -2120,7 +2164,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
   const x = (km) => padding.left + (km / maxKm) * (width - padding.left - padding.right);
   const y = (alt) => height - padding.bottom - ((alt - minAlt) / altitudeSpan) * (height - padding.top - padding.bottom);
 
-  ctx.strokeStyle = "#e2e7ea";
+  ctx.strokeStyle = "#dbe9e2";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 5; i++) {
     const gy = padding.top + i * ((height - padding.top - padding.bottom) / 5);
@@ -2129,8 +2173,8 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     ctx.moveTo(padding.left, gy);
     ctx.lineTo(width - padding.right, gy);
     ctx.stroke();
-    ctx.fillStyle = "#687178";
-    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "#6d7f78";
+    ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     ctx.fillText(`${Math.round(altitudeLabel)} m`, padding.left - 8, gy);
@@ -2141,10 +2185,10 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     ctx.beginPath();
     ctx.moveTo(gx, padding.top);
     ctx.lineTo(gx, height - padding.bottom);
-    ctx.strokeStyle = "#eef2f3";
+    ctx.strokeStyle = "#edf3ee";
     ctx.stroke();
-    ctx.fillStyle = "#687178";
-    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "#6d7f78";
+    ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(`${km}`, gx, height - padding.bottom + 10);
@@ -2160,7 +2204,7 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
   ctx.lineTo(x(maxKm), height - padding.bottom);
   ctx.lineTo(x(0), height - padding.bottom);
   ctx.closePath();
-  ctx.fillStyle = "rgba(15, 118, 110, 0.13)";
+  ctx.fillStyle = "rgba(23, 130, 118, 0.16)";
   ctx.fill();
 
   ctx.beginPath();
@@ -2170,34 +2214,45 @@ function drawProfile(canvas, segments, currentKm = null, completedKm = null) {
     if (index === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   });
-  ctx.strokeStyle = "#0f766e";
+  ctx.strokeStyle = "#178276";
   ctx.lineWidth = 3;
   ctx.stroke();
 
+  let lastGradeLabelRight = -Infinity;
   segments.forEach((segment) => {
     if (segment.end_km <= segment.start_km) return;
     const startX = x(segment.start_km);
     const endX = x(segment.end_km);
     const labelX = startX + (endX - startX) / 2;
     const grade = Number(segment.grade_percent ?? calculateSegmentGrade(segment));
-    ctx.fillStyle = grade >= 8 ? "#b42318" : grade >= 5 ? "#c56b17" : "#0f766e";
-    ctx.font = "12px sans-serif";
+    const gradeLabel = `${grade.toFixed(1)}%`;
+    ctx.fillStyle = grade >= 8 ? "#d9543d" : grade >= 5 ? "#d98524" : "#178276";
+    ctx.font = "700 12px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${grade.toFixed(1)}%`, labelX, 18);
+    const labelWidth = ctx.measureText(gradeLabel).width;
+    const labelLeft = labelX - labelWidth / 2;
+    const labelRight = labelX + labelWidth / 2;
+    const segmentHasRoom = endX - startX >= labelWidth + 14;
+    const labelDoesNotCollide = labelLeft >= lastGradeLabelRight + 8;
+    const labelFitsPlot = labelLeft >= padding.left && labelRight <= width - padding.right;
+    if (segmentHasRoom && labelDoesNotCollide && labelFitsPlot) {
+      ctx.fillText(gradeLabel, labelX, 18);
+      lastGradeLabelRight = labelRight;
+    }
     ctx.beginPath();
     ctx.moveTo(startX, padding.top - 8);
     ctx.lineTo(endX, padding.top - 8);
-    ctx.strokeStyle = "rgba(15, 118, 110, 0.28)";
+    ctx.strokeStyle = "rgba(23, 130, 118, 0.28)";
     ctx.lineWidth = 2;
     ctx.stroke();
   });
 
-  if (completedKm !== null) drawMarker(ctx, x(completedKm), padding.top, height - padding.bottom, "#0f766e");
-  if (currentKm !== null) drawMarker(ctx, x(currentKm), padding.top, height - padding.bottom, "#ef8a23");
+  if (completedKm !== null) drawMarker(ctx, x(completedKm), padding.top, height - padding.bottom, "#178276");
+  if (currentKm !== null) drawMarker(ctx, x(currentKm), padding.top, height - padding.bottom, "#ff7657");
 
-  ctx.fillStyle = "#687178";
-  ctx.font = "12px sans-serif";
+  ctx.fillStyle = "#6d7f78";
+  ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillText("km", width - padding.right - 14, height - 12);
@@ -2227,7 +2282,27 @@ function getSegmentAtKm(segments, km) {
 function applyTrainerGradeLimit(grade) {
   const s = state.settings;
   const value = s.enable_negative_grades ? grade : Math.max(0, grade);
-  return Math.min(s.max_trainer_grade_percent, value);
+  const manualLimit = Number(s.max_trainer_grade_percent || 0);
+  return manualLimit > 0 ? Math.min(manualLimit, value) : value;
+}
+
+function connectedTrainerName() {
+  const info = state.trainer.deviceInfo;
+  if (!state.trainer.connected) return "Rodillo inteligente";
+  const manufacturerAndModel = [info?.manufacturer, info?.model].filter(Boolean).join(" ");
+  return manufacturerAndModel || info?.name || "Rodillo FTMS";
+}
+
+function formatCapability(value) {
+  if (!state.trainer.connected || value === null || value === undefined) return "No anunciado";
+  return value ? "Compatible" : "No compatible";
+}
+
+function trainerControlSummary() {
+  if (state.trainer.features?.simulationParameters === false) {
+    return "Leyendo los datos del rodillo; este modelo no anuncia control FTMS de pendiente.";
+  }
+  return "Leyendo datos reales y enviando la pendiente mediante Bluetooth FTMS.";
 }
 
 function interpolateAltitude(segment, km, fallback) {

@@ -28,7 +28,7 @@ from app.openai_import import import_route_from_image
 from app.secrets import decrypt_secret, encrypt_secret
 
 
-app = FastAPI(title="Tacx Flux Climber", version="0.1.0")
+app = FastAPI(title="Climber Indoor Cycling", version="0.1.0")
 
 
 @app.on_event("startup")

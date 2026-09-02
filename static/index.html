@@ -3,33 +3,85 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tacx Flux Climber</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 42h9l8-20 7 20h12' fill='none' stroke='white' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <meta name="theme-color" content="#f4f8f4" />
+    <title>Climber · Indoor Cycling Studio</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='20' fill='%23136f63'/%3E%3Cpath d='M12 42l12-17 8 10 7-14 13 21' fill='none' stroke='%23f7faf4' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='44' cy='18' r='4' fill='%23ff7657'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <header class="mobile-topbar">
+      <button class="mobile-brand" data-view="routes" aria-label="Ir a rutas">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><path d="M7 33 17 19l7 9 6-12 11 17"/><circle cx="35" cy="13" r="3"/></svg>
+        </span>
+        <span><strong>Climber</strong><small>Indoor studio</small></span>
+      </button>
+      <div class="mobile-account" data-user-account hidden>
+        <span class="mobile-avatar" aria-hidden="true">C</span>
+        <strong data-user-email></strong>
+        <button data-action="logout" aria-label="Cerrar sesión" title="Cerrar sesión">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+      <button class="mobile-settings" data-view="settings" aria-label="Ajustes" title="Ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.09v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+      </button>
+    </header>
+
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-main">
-            <div class="brand-mark">TC</div>
-            <div>
-              <h1>Tacx Flux Climber</h1>
-              <p>Training studio</p>
-            </div>
-          </div>
-          <button class="settings-shortcut" data-view="settings" aria-label="Ajustes" title="Ajustes">⚙</button>
+          <button class="brand-main" data-view="routes" aria-label="Ir a rutas">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 48 48"><path d="M7 33 17 19l7 9 6-12 11 17"/><circle cx="35" cy="13" r="3"/></svg>
+            </span>
+            <span class="brand-copy">
+              <strong>Climber</strong>
+              <small>Indoor cycling studio</small>
+            </span>
+          </button>
         </div>
+
+        <div class="sidebar-intro">
+          <span>Tu espacio de entrenamiento</span>
+          <strong>Cada ruta empieza con una cima.</strong>
+        </div>
+
         <nav aria-label="Principal">
-          <button data-view="routes" class="active"><span class="nav-icon">R</span><span>Rutas</span></button>
-          <button data-view="import"><span class="nav-icon">+</span><span>Crear Ruta</span></button>
-          <button data-view="activities"><span class="nav-icon">A</span><span>Actividades</span></button>
-          <button data-view="profile"><span class="nav-icon">P</span><span>Perfil</span></button>
+          <button data-view="routes" class="active">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18 8.5 8l4 6 3-5 5.5 9"/><path d="M4 21h16"/></svg></span>
+            <span>Rutas</span>
+          </button>
+          <button data-view="import">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+            <span>Crear ruta</span>
+          </button>
+          <button data-view="activities">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg></span>
+            <span>Actividades</span>
+          </button>
+          <button data-view="profile">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+            <span>Perfil</span>
+          </button>
+          <button data-view="settings">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.09v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg></span>
+            <span>Ajustes</span>
+          </button>
         </nav>
+
+        <div class="sidebar-art" aria-hidden="true">
+          <span>Tu próxima cima</span>
+          <strong>Sube. Respira. Repite.</strong>
+          <svg viewBox="0 0 180 64"><path d="M0 54 30 33l21 12L82 8l29 37 20-18 49 27"/><circle cx="128" cy="18" r="5"/></svg>
+        </div>
+
         <div class="user-account" data-user-account hidden>
-          <span>Sesión iniciada</span>
-          <strong data-user-email></strong>
-          <button data-action="logout">Cerrar sesión</button>
+          <span class="user-avatar" aria-hidden="true">C</span>
+          <span class="user-details"><small>Sesión iniciada</small><strong data-user-email></strong></span>
+          <button data-action="logout" aria-label="Cerrar sesión" title="Cerrar sesión">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          </button>
         </div>
       </aside>
       <main id="app" class="content"></main>
