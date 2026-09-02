@@ -129,7 +129,6 @@ class AppSettings(BaseModel):
     openai_api_key_configured: bool = False
     enable_negative_grades: bool = True
     rider_weight_kg: float = Field(default=75, ge=20, le=300)
-    bike_weight_kg: float = Field(default=9, ge=0, le=50)
     ftp_w: int = Field(default=0, ge=0)
     ftp_updated_at: str = ""
     ftp_method: str = ""
@@ -141,7 +140,6 @@ class AppSettingsUpdate(BaseModel):
     clear_openai_api_key: bool = False
     enable_negative_grades: bool = True
     rider_weight_kg: float = Field(default=75, ge=20, le=300)
-    bike_weight_kg: float = Field(default=9, ge=0, le=50)
     ftp_w: int = Field(default=0, ge=0)
     ftp_updated_at: str = ""
     ftp_method: str = ""

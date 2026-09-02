@@ -58,7 +58,7 @@ Cada fabricante puede presentar una secuencia distinta. Si el rodillo no anuncia
 - Guardado de actividades parciales o completadas.
 - Historial de actividades con distancia, desnivel, potencia, cadencia y velocidad.
 - Conexion OAuth por usuario con Strava y subida automatica de actividades completadas como `VirtualRide`.
-- Ajustes de pendientes negativas, peso del ciclista y peso de la bici.
+- Ajustes de pendientes negativas y peso del ciclista.
 
 ## Requisitos
 

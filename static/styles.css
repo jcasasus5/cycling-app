@@ -1082,6 +1082,10 @@ section {
   align-items: start;
 }
 
+.settings-row-start {
+  grid-column: 1;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(115px, 1fr));
@@ -1194,21 +1198,6 @@ input[type="checkbox"] {
   color: var(--muted);
   font-weight: 500;
   line-height: 1.45;
-}
-
-.settings-note {
-  margin: 0;
-  padding: 13px 15px;
-  border: 1px solid rgba(23, 130, 118, 0.18);
-  border-radius: 14px;
-  color: var(--muted);
-  background: rgba(231, 247, 241, 0.72);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.settings-note strong {
-  color: var(--ink-soft);
 }
 
 .upload-panel {

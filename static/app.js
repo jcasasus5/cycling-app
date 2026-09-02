@@ -752,9 +752,7 @@ function renderSettings() {
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="" autocomplete="off" placeholder="${s.openai_api_key_configured ? "Clave guardada" : "sk-..."}" /><small>${keyStatus}</small></label>
         <label class="check wide"><input type="checkbox" name="clear_openai_api_key" /> Eliminar la clave de OpenAI guardada</label>
         <label>Peso ciclista<input type="number" min="20" max="300" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /><small>Se usa para calcular tu FTP relativo en W/kg.</small></label>
-        <label>Peso bici<input type="number" min="0" max="50" step="0.1" name="bike_weight_kg" value="${s.bike_weight_kg}" /><small>Se conserva para la simulación física cuando el protocolo conectado permita utilizarlo.</small></label>
-        <label class="check"><input type="checkbox" name="enable_negative_grades" ${s.enable_negative_grades ? "checked" : ""} /> Pendientes negativas</label>
-        <p class="settings-note wide"><strong>Compatibilidad:</strong> al conectar, la app detecta si el rodillo anuncia control de pendiente, ERG y calibración mediante FTMS. La app envía la pendiente de la ruta y el propio rodillo gestiona el límite físico de su hardware.</p>
+        <label class="check settings-row-start"><input type="checkbox" name="enable_negative_grades" ${s.enable_negative_grades ? "checked" : ""} /> Pendientes negativas</label>
       </div>
       ${state.config.auth_enabled ? `
         <div class="panel form-grid password-panel">
@@ -2053,7 +2051,6 @@ async function saveSettingsPayload(overrides = {}) {
     clear_openai_api_key: false,
     enable_negative_grades: s.enable_negative_grades,
     rider_weight_kg: s.rider_weight_kg,
-    bike_weight_kg: s.bike_weight_kg,
     ftp_w: s.ftp_w || 0,
     ftp_updated_at: s.ftp_updated_at || "",
     ftp_method: s.ftp_method || "",
@@ -2069,8 +2066,7 @@ async function saveSettings() {
     openai_api_key: root.querySelector("[name='openai_api_key']").value,
     clear_openai_api_key: root.querySelector("[name='clear_openai_api_key']").checked,
     enable_negative_grades: root.querySelector("[name='enable_negative_grades']").checked,
-    rider_weight_kg: Number(root.querySelector("[name='rider_weight_kg']").value),
-    bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
+    rider_weight_kg: Number(root.querySelector("[name='rider_weight_kg']").value)
   };
   await withLoading("Guardando ajustes...", async () => {
     await saveSettingsPayload(settings);

@@ -13,7 +13,6 @@ def test_update_settings_persists_booleans_and_numbers(tmp_path):
                 openai_api_key="test-key",
                 enable_negative_grades=True,
                 rider_weight_kg=66.5,
-                bike_weight_kg=8.7,
                 ftp_w=238,
                 ftp_updated_at="2026-06-17T10:00:00Z",
                 ftp_method="ramp",
@@ -25,7 +24,6 @@ def test_update_settings_persists_booleans_and_numbers(tmp_path):
 
         assert settings.enable_negative_grades is True
         assert settings.rider_weight_kg == 66.5
-        assert settings.bike_weight_kg == 8.7
         assert settings.ftp_w == 238
         assert settings.ftp_updated_at == "2026-06-17T10:00:00Z"
         assert settings.ftp_method == "ramp"
