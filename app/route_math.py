@@ -15,9 +15,8 @@ def get_segment_at_km(segments: list[RouteSegment], km: float) -> RouteSegment |
     return segments[-1]
 
 
-def apply_trainer_grade_limit(grade_percent: float, settings: AppSettings) -> float:
-    grade = grade_percent if settings.enable_negative_grades else max(0, grade_percent)
-    return min(settings.max_trainer_grade_percent, grade)
+def apply_trainer_grade_settings(grade_percent: float, settings: AppSettings) -> float:
+    return grade_percent if settings.enable_negative_grades else max(0, grade_percent)
 
 
 def interpolate_altitude(segment: RouteSegment | None, km: float, fallback_altitude: float) -> float:

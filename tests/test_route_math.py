@@ -1,5 +1,5 @@
 from app.models import AppSettings, RouteSegment
-from app.route_math import apply_trainer_grade_limit, calculate_averages, get_segment_at_km, interpolate_altitude
+from app.route_math import apply_trainer_grade_settings, calculate_averages, get_segment_at_km, interpolate_altitude
 
 
 segments = [
@@ -13,15 +13,15 @@ def test_get_segment_at_km():
     assert get_segment_at_km(segments, 2.5).id == 2
 
 
-def test_apply_trainer_grade_limit():
-    settings = AppSettings(max_trainer_grade_percent=8)
-    assert apply_trainer_grade_limit(12, settings) == 8
-    assert apply_trainer_grade_limit(6, settings) == 6
+def test_apply_trainer_grade_settings_passes_positive_grade_through():
+    settings = AppSettings()
+    assert apply_trainer_grade_settings(12, settings) == 12
+    assert apply_trainer_grade_settings(6, settings) == 6
 
 
 def test_disable_negative_grades():
     settings = AppSettings(enable_negative_grades=False)
-    assert apply_trainer_grade_limit(-4, settings) == 0
+    assert apply_trainer_grade_settings(-4, settings) == 0
 
 
 def test_interpolate_altitude():

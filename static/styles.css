@@ -1078,6 +1078,10 @@ section {
   gap: 15px;
 }
 
+.settings-panel {
+  align-items: start;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(115px, 1fr));

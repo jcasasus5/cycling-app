@@ -604,7 +604,7 @@ function renderTraining() {
   syncTrainingFromTrainer();
   const segment = getSegmentAtKm(route.segments, t.km);
   const realGrade = segment?.grade_percent ?? 0;
-  const trainerGrade = applyTrainerGradeLimit(realGrade);
+  const trainerGrade = applyTrainerGradeSettings(realGrade);
   const altitude = interpolateAltitude(segment, t.km, route.start_altitude_m);
   const paused = !hasLiveTrainerData() || t.speed <= 0.2;
   const progress = route.distance_km > 0 ? Math.min(100, (t.km / route.distance_km) * 100) : 0;
@@ -751,11 +751,10 @@ function renderSettings() {
       <div class="panel form-grid settings-panel">
         <label class="wide">API key de OpenAI<input type="password" name="openai_api_key" value="" autocomplete="off" placeholder="${s.openai_api_key_configured ? "Clave guardada" : "sk-..."}" /><small>${keyStatus}</small></label>
         <label class="check wide"><input type="checkbox" name="clear_openai_api_key" /> Eliminar la clave de OpenAI guardada</label>
-        <label>Límite manual de pendiente<input type="number" min="0" max="100" step="0.1" name="max_trainer_grade_percent" value="${s.max_trainer_grade_percent}" /><small>Configúralo según el fabricante. Usa 0 para no aplicar un límite adicional desde la app.</small></label>
         <label>Peso ciclista<input type="number" min="20" max="300" step="0.1" name="rider_weight_kg" value="${s.rider_weight_kg}" /><small>Se usa para calcular tu FTP relativo en W/kg.</small></label>
         <label>Peso bici<input type="number" min="0" max="50" step="0.1" name="bike_weight_kg" value="${s.bike_weight_kg}" /><small>Se conserva para la simulación física cuando el protocolo conectado permita utilizarlo.</small></label>
         <label class="check"><input type="checkbox" name="enable_negative_grades" ${s.enable_negative_grades ? "checked" : ""} /> Pendientes negativas</label>
-        <p class="settings-note wide"><strong>Compatibilidad:</strong> la app consulta las capacidades anunciadas por cada rodillo y solo utiliza las funciones FTMS disponibles. FTMS estándar no permite enviar los pesos; no se falsean modificando la pendiente ni los coeficientes de rodadura.</p>
+        <p class="settings-note wide"><strong>Compatibilidad:</strong> al conectar, la app detecta si el rodillo anuncia control de pendiente, ERG y calibración mediante FTMS. La app envía la pendiente de la ruta y el propio rodillo gestiona el límite físico de su hardware.</p>
       </div>
       ${state.config.auth_enabled ? `
         <div class="panel form-grid password-panel">
@@ -1686,7 +1685,7 @@ async function tickTraining() {
   syncTrainingFromTrainer();
   const paused = !hasLiveTrainerData() || t.speed <= 0.2;
   const segment = getSegmentAtKm(route.segments, t.km);
-  const grade = applyTrainerGradeLimit(segment?.grade_percent ?? 0);
+  const grade = applyTrainerGradeSettings(segment?.grade_percent ?? 0);
   const altitude = interpolateAltitude(segment, t.km, route.start_altitude_m);
   await sendCurrentGradeToTrainer();
   const sample = {
@@ -1731,7 +1730,7 @@ async function sendCurrentGradeToTrainer(force = false) {
   if (state.trainer.features?.simulationParameters === false) return;
   if (gradeCommandPending) return;
   const segment = getSegmentAtKm(state.selectedRoute.segments, state.training.km);
-  const grade = applyTrainerGradeLimit(segment?.grade_percent ?? 0);
+  const grade = applyTrainerGradeSettings(segment?.grade_percent ?? 0);
   gradeCommandPending = true;
   try {
     await trainerClient.setGrade(grade, { force });
@@ -2052,7 +2051,6 @@ async function saveSettingsPayload(overrides = {}) {
   const payload = {
     openai_api_key: "",
     clear_openai_api_key: false,
-    max_trainer_grade_percent: s.max_trainer_grade_percent,
     enable_negative_grades: s.enable_negative_grades,
     rider_weight_kg: s.rider_weight_kg,
     bike_weight_kg: s.bike_weight_kg,
@@ -2070,7 +2068,6 @@ async function saveSettings() {
   const settings = {
     openai_api_key: root.querySelector("[name='openai_api_key']").value,
     clear_openai_api_key: root.querySelector("[name='clear_openai_api_key']").checked,
-    max_trainer_grade_percent: Number(root.querySelector("[name='max_trainer_grade_percent']").value),
     enable_negative_grades: root.querySelector("[name='enable_negative_grades']").checked,
     rider_weight_kg: Number(root.querySelector("[name='rider_weight_kg']").value),
     bike_weight_kg: Number(root.querySelector("[name='bike_weight_kg']").value)
@@ -2279,11 +2276,9 @@ function getSegmentAtKm(segments, km) {
   return segments.find((segment) => km >= segment.start_km && km < segment.end_km) ?? segments.find((segment) => km <= segment.end_km) ?? segments.at(-1);
 }
 
-function applyTrainerGradeLimit(grade) {
+function applyTrainerGradeSettings(grade) {
   const s = state.settings;
-  const value = s.enable_negative_grades ? grade : Math.max(0, grade);
-  const manualLimit = Number(s.max_trainer_grade_percent || 0);
-  return manualLimit > 0 ? Math.min(manualLimit, value) : value;
+  return s.enable_negative_grades ? grade : Math.max(0, grade);
 }
 
 function connectedTrainerName() {

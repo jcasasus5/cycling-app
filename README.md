@@ -26,7 +26,7 @@ Durante un entrenamiento, la app:
 - Calcula el avance virtual por la ruta usando la velocidad recibida.
 - Busca la pendiente correspondiente al kilometro actual.
 - Envia esa pendiente al rodillo mediante FTMS.
-- Puede limitar la pendiente enviada usando un valor manual apropiado para el modelo; `0` deja el control del limite al rodillo.
+- Deja que el propio rodillo gestione el limite fisico de su hardware.
 - Puede bloquear pendientes negativas si se desactiva ese ajuste.
 - Al pausar, guardar o terminar, intenta devolver el rodillo a `0%` y pausar el control FTMS.
 
@@ -58,7 +58,7 @@ Cada fabricante puede presentar una secuencia distinta. Si el rodillo no anuncia
 - Guardado de actividades parciales o completadas.
 - Historial de actividades con distancia, desnivel, potencia, cadencia y velocidad.
 - Conexion OAuth por usuario con Strava y subida automatica de actividades completadas como `VirtualRide`.
-- Ajustes de pendiente maxima, pendientes negativas, peso del ciclista y peso de la bici.
+- Ajustes de pendientes negativas, peso del ciclista y peso de la bici.
 
 ## Requisitos
 

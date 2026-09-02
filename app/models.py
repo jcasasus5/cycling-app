@@ -127,7 +127,6 @@ class StravaOAuthCallback(BaseModel):
 class AppSettings(BaseModel):
     openai_api_key: str = ""
     openai_api_key_configured: bool = False
-    max_trainer_grade_percent: float = Field(default=16, ge=0, le=100)
     enable_negative_grades: bool = True
     rider_weight_kg: float = Field(default=75, ge=20, le=300)
     bike_weight_kg: float = Field(default=9, ge=0, le=50)
@@ -140,7 +139,6 @@ class AppSettings(BaseModel):
 class AppSettingsUpdate(BaseModel):
     openai_api_key: str = ""
     clear_openai_api_key: bool = False
-    max_trainer_grade_percent: float = Field(default=16, ge=0, le=100)
     enable_negative_grades: bool = True
     rider_weight_kg: float = Field(default=75, ge=20, le=300)
     bike_weight_kg: float = Field(default=9, ge=0, le=50)

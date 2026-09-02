@@ -281,7 +281,6 @@ def get_settings(auth: AuthContext) -> AppSettings:
     return AppSettings(
         openai_api_key="",
         openai_api_key_configured=bool(row.get("openai_api_key_encrypted")),
-        max_trainer_grade_percent=row["max_trainer_grade_percent"],
         enable_negative_grades=row["enable_negative_grades"],
         rider_weight_kg=row["rider_weight_kg"],
         bike_weight_kg=row["bike_weight_kg"],
@@ -319,7 +318,6 @@ def update_settings(auth: AuthContext, settings: AppSettingsUpdate) -> AppSettin
     payload = {
         "user_id": auth.user_id,
         "openai_api_key_encrypted": encrypted,
-        "max_trainer_grade_percent": settings.max_trainer_grade_percent,
         "enable_negative_grades": settings.enable_negative_grades,
         "rider_weight_kg": settings.rider_weight_kg,
         "bike_weight_kg": settings.bike_weight_kg,
